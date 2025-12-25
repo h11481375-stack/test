@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoe DIY - 智能导购专家</title>
+    <style>
+        :root { --primary-color: #ff7e5f; --bg-color: #1a1a1a; --chat-bg: #2d2d2d; }
+        body, html { height: 100%; margin: 0; font-family: 'PingFang SC', sans-serif; background-color: var(--bg-color); color: #e0e0e0; display: flex; flex-direction: column; }
+        #setup-area { background: #111; padding: 12px; border-bottom: 2px solid var(--primary-color); }
+        .config-grid { display: flex; gap: 10px; max-width: 600px; margin: 0 auto; }
+        #keyInput { flex: 1; background: #222; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; outline: none; font-size: 13px; }
+        #confirmBtn { background: var(--primary-color); color: white; border: none; padding: 0 20px; border-radius: 6px; cursor: pointer; font-weight: bold; white-space: nowrap; }
+        #chat-container { flex: 1; overflow-y: auto; padding: 20px 0; scroll-behavior: smooth; }
+        .message-row { width: 100%; display: flex; justify-content: center; padding: 15px 0; border-bottom: 1px solid #333; }
+        .ai-row { background-color: #252525; }
+        .message-content { width: 90%; max-width: 800px; display: flex; gap: 15px; }
+        .avatar { width: 35px; height: 35px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
+        .ai-avatar { background: linear-gradient(135deg, #ff7e5f, #feb47b); color: white; }
+        .user-avatar { background: #555; color: white; }
+        .text { font-size: 15px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+        .input-area { padding: 20px; background: #1a1a1a; display: flex; justify-content: center; }
+        .input-wrapper { position: relative; width: 90%; max-width: 800px; }
+        #userInput { width: 100%; background: #2d2d2d; border: 1px solid #444; border-radius: 12px; padding: 15px 50px 15px 20px; color: white; outline: none; box-sizing: border-box; }
+        #sendBtn { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--primary-color); cursor: pointer; font-size: 24px; }
+    </style>
+</head>
+<body>
+
+    <div id="setup-area">
+        <div class="config-grid">
+            <input type="password" id="keyInput" placeholder="输入智谱 API Key (需账户有余额)">
+            <button id="confirmBtn" onclick="saveConfig()">激活大师</button>
+        </div>
+    </div>
+
+    <div id="chat-container">
+        <div class="message-row ai-row">
+            <div class="message-content">
+                <div class="avatar ai-avatar">匠</div>
+                <div class="text">你好！我是已充值 1 元、准备好翻阅 Excel 的 Zoe 助手。
+请提问关于产品库里的内容，我会强制执行检索。</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-area">
+        <div class="input-wrapper">
+            <input type="text" id="userInput" placeholder="问问我 Excel 里的产品..." autocomplete="off">
+            <button id="sendBtn" onclick="handleSend()">🚀</button>
+        </div>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('userInput');
+        // 已填入你的知识库 ID
+        const KNOWLEDGE_ID = "2004080090966794240";
+
+        function saveConfig() {
+            const key = document.getElementById('keyInput').value.trim();
+            if(key) {
+                localStorage.setItem('zhipu_key', key);
+                alert("✅ Key 已保存。请确保账户余额大于 0。");
+            }
+        }
+
+        window.onload = () => {
+            if(localStorage.getItem('zhipu_key')) {
+                document.getElementById('keyInput').value = localStorage.getItem('zhipu_key');
+            }
+        }
+
+        async function handleSend() {
+            const text = userInput.value.trim();
+            const apiKey = document.getElementById('keyInput').value.trim();
+
+            if (!text || !apiKey) {
+                alert("请输入 API Key！");
+                return;
+            }
+
+            addMessage(text, 'user');
+            userInput.value = '';
+
+            const tempId = 'ai-' + Date.now();
+            addMessage("🔍 正在检索产品库 (RAG 模式)...", 'ai', tempId);
+
+            try {
+                const response = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: "glm-4",
+                        messages: [
+                            { 
+                                role: "system", 
+                                content: "你是一个专业的Excel导购助手。你的核心任务是调用检索工具(retrieval)。对于用户的问题，你必须优先从知识库获取答案。如果没有找到，必须如实回答'库中无此数据'。" 
+                            },
+                            { role: "user", content: `请查阅知识库并回答：${text}` }
+                        ],
+                        tools: [{
+                            type: "retrieval",
+                            retrieval: { 
+                                knowledge_id: KNOWLEDGE_ID
+                            }
+                        }],
+                        tool_choice: "auto",
+                        temperature: 0.1
+                    })
+                });
+
+                const data = await response.json();
+                console.log("API 原始返回：", data);
+
+                if (data.error) {
+                    document.getElementById(tempId).innerText = "❌ API 报错：" + data.error.message;
+                    return;
+                }
+
+                if (data.choices && data.choices[0]) {
+                    const aiReply = data.choices[0].message.content;
+                    
+                    // 判断是否真的触发了检索
+                    if (aiReply.includes("人工智能助手") || aiReply.includes("我无法访问")) {
+                        document.getElementById(tempId).innerText = "⚠️ 检索未触发。原因可能是：1. 智谱余额未实时到账（需等5分钟）；2. Excel 关键词不匹配。建议问更具体的词。";
+                    } else {
+                        typeWriter(aiReply, tempId);
+                    }
+                }
+
+            } catch (err) {
+                document.getElementById(tempId).innerText = "❌ 连接失败，请检查网络。";
+            }
+        }
+
+        function addMessage(text, role, id = null) {
+            const isAi = role === 'ai';
+            const html = `
+                <div class="message-row ${isAi ? 'ai-row' : ''}">
+                    <div class="message-content">
+                        <div class="avatar ${isAi ? 'ai-avatar' : 'user-avatar'}">${isAi ? '匠' : '你'}</div>
+                        <div class="text" ${id ? `id="${id}"` : ''}>${text}</div>
+                    </div>
+                </div>`;
+            chatContainer.insertAdjacentHTML('beforeend', html);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function typeWriter(text, elementId) {
+            const element = document.getElementById(elementId);
+            element.innerText = "";
+            let i = 0;
+            function typing() {
+                if (i < text.length) {
+                    element.innerText += text.charAt(i);
+                    i++;
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                    setTimeout(typing, 20);
+                }
+            }
+            typing();
+        }
+
+        userInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleSend(); });
+    </script>
+</body>
+</html>
