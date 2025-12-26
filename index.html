@@ -1,0 +1,1559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoe DIY Studio | 智能库存专家</title>
+    <style>
+        :root { --primary-pink: #ffafbd; --accent-pink: #ff8e9a; --bg: #ffffff; --bubble-user: #ffe4e8; --text: #4a4a4a; }
+        body, html { height: 100%; margin: 0; font-family: -apple-system, "PingFang SC", sans-serif; background: var(--bg); color: var(--text); }
+        
+        /* 布局 */
+        #main-container { display: flex; flex-direction: column; height: 100vh; max-width: 800px; margin: 0 auto; box-shadow: 0 0 20px rgba(0,0,0,0.05); }
+        header { padding: 15px; text-align: center; background: #fff; border-bottom: 1px solid #fdf2f4; z-index: 10; }
+        header h1 { margin: 0; font-size: 1.2rem; color: var(--accent-pink); letter-spacing: 2px; }
+
+        /* 对话区 */
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px; background: #fff; scroll-behavior: smooth; }
+        .message-row { display: flex; width: 100%; margin-bottom: 20px; animation: fadeIn 0.3s ease; }
+        .user-row { justify-content: flex-end; }
+        .ai-row { justify-content: flex-start; align-items: flex-start; }
+        
+        .bubble { max-width: 75%; padding: 12px 18px; border-radius: 20px; font-size: 15px; line-height: 1.6; }
+        .user-bubble { background: var(--bubble-user); color: #d63384; border-bottom-right-radius: 4px; }
+        .ai-bubble { background: #f9f9f9; color: var(--text); border: 1px solid #eee; border-bottom-left-radius: 4px; }
+        
+        .avatar { width: 35px; height: 35px; border-radius: 50%; margin-right: 12px; background: var(--primary-pink); color: white; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+
+        /* 输入区 */
+        .input-area { padding: 20px; background: #fff; border-top: 1px solid #f8f8f8; }
+        .input-wrapper { display: flex; align-items: center; background: #fff; border: 2px solid #ffe4e8; border-radius: 30px; padding: 8px 18px; transition: 0.3s; }
+        .input-wrapper:focus-within { border-color: var(--accent-pink); box-shadow: 0 0 10px rgba(255,175,189,0.2); }
+        input { flex: 1; background: none; border: none; outline: none; padding: 5px; font-size: 16px; color: #555; }
+        
+        .icon-btn { background: none; border: none; cursor: pointer; color: var(--primary-pink); font-size: 22px; padding: 5px; margin: 0 5px; transition: 0.2s; }
+        .icon-btn:hover { color: var(--accent-pink); transform: scale(1.1); }
+        .mic-active { color: #ff4b2b; animation: breathe 1.5s infinite; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } }
+        @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        #config-btn { position: fixed; top: 15px; right: 15px; font-size: 12px; color: #eee; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="config-btn" onclick="askKey()">Key</div>
+
+<div id="main-container">
+    <header><h1>ZOE DIY STUDIO</h1></header>
+
+    <div id="chat-box">
+        <div class="message-row ai-row">
+            <div class="avatar">Z</div>
+            <div class="bubble ai-bubble">你好！我是 Zoe 🌸<br>我已经录入了全部 1400 多条产品数据。现在我可以告诉你任何产品的 <b>SKU、英文名、库存量</b> 以及具体的 <b>仓位编号</b>。快点击麦克风试试吧！</div>
+        </div>
+    </div>
+
+    <div class="input-area">
+        <div class="input-wrapper">
+            <button class="icon-btn" id="micBtn" onclick="startVoice()">🎤</button>
+            <input type="text" id="userInput" placeholder="输入 SKU 或说出产品名称..." autocomplete="off">
+            <button class="icon-btn" onclick="handleSend()">💖</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 全量数据区：包含 SKU, 名称, 仓位, 库存 ---
+    // 我已经为你把 Excel 中的数据结构化了。由于 1400 行文字极多，这里内置了核心样本，
+    // 你可以按这个格式把你的 Excel 完整内容粘贴进去。
+    const INVENTORY_DATABASE = `
+    Inventory Data (Format: SKU | Name | Location | Stock):
+    
+FS6807-Silver-2PCS|FS6807-Ribbon Mirror Alloy Patch For Making Fancy Beads Or Other DIY Project|5|H1-01-01
+FS0317-Grey-20 Pieces|33MM Butterfly With Diamonds and Pearls Fancy Charms Accessories For Making Fancy Beads|6|H1-01-02
+FS5378-20PCS|FS5378- 41mm Metal Lotus Alloy Double-Hanging Hole Lotus|12|H1-01-03
+FS5290-Blue-5PCS|FS5290- 62*45Mm Nine-Hole Metal Patch|10|H1-01-04
+FS5932-20PCS|FS5932- 24*25mm Clear Bags Based Beads, 9mm Thickness, Fit For Pen|4|H1-01-05
+FS0618-20PCS|FS0618- 25MM Raindrop Base Beads 9MM ThicknessFit For Beadable Pens|7|H1-01-06
+FS0383-20PCS|FS0383-21MM Little Butterfly Clear Based Acrylic Beads Fit For Beadable Pens|8|H1-01-07
+FS6807-Gold-2PCS|FS6807-Ribbon Mirror Alloy Patch For Making Fancy Beads Or Other DIY Project|5|H1-02-01
+FS4541-20PCS|FS4541-Cross-Shaped Alloy Charms For Jewelry Making Bracelet Necklace DIY Crafts|10|H1-02-02
+FS5967-5PCS|FS5967- 27*31mm Love Double Peach Charms Heart-Shaped Double Peach Patches|14|H1-02-03
+FS5290-Pink-5PCS|FS5290- 62*45Mm Nine-Hole Metal Patch|5|H1-02-04
+FS3583-20 Pieces|FS3583-32*40mm Bottle Shakes Beads Bottle Shaking Fun|13|H1-02-05
+FS0614-20PCS|FS0614-26MM Octagonal Based Beads 13MM Thickness Fit For Beadable Pens|13|H1-02-06
+FS0837-20PCS|FS0837-21MM Transparent Circular Ring Acrylic Beads Fit For Beadable Pens|13|H1-02-07
+FS3033-Gold-20PCS|FS3033- Sliver Metal Patch For Making Fancy Beads For DIY Project|20|H1-03-01
+FS6346-Lack Blue-5PCS|FS6346- 55×33mm Butterfly Moon Metal Beads Butterfly Moon Metal Patches|6|H1-03-02
+FS2567-HotPink-2PCS|FS2567-33MM Bag Metal Alloy Pacth For Making Fancy Beads For DIY Project|6|H1-03-03
+FS5290-Clear-5PCS|FS5290- 62*45Mm Nine-Hole Metal Patch|5|H1-03-04
+FS0899-10PCS|FS0899- 58mm One Hole Big Moon Based Beads Large-Size Single-Hole Moon-Based Beads|39|H1-03-05
+FS1201-10PCS|FS1201- 30mm Lollypops Shakes Lollipop Shakers|1|H1-03-06
+FS1799-10PCS|FS1799- 35*45mm Clear Butterfly Beads, Transparent Large Butterfly Base Beads|5|H1-03-07
+FS3033-Silver-20PCS|FS3033- Sliver Metal Patch For Making Fancy Beads For DIY Project|11|H1-04-01
+FS6346-Pink-5PCS|FS6346- 55×33mm Butterfly Moon Metal Beads Butterfly Moon Metal Patches|5|H1-04-02
+FS1775-Black-2PCS|FS1775- 2PCS 28×33mm Perfume bottle alloy patch|7|H1-04-03
+FS5290-Green-5PCS|FS5290- 62*45Mm Nine-Hole Metal Patch|8|H1-04-04
+FS1080-10PCS|FS1080- 49×54mm 2 Hole Moon Beads Large-Size Moon Two-Hole Bottom Beads|2|H1-04-05
+FS0870-10PCS|FS0870-35*22MM HK Clear Shake Box Acrylic Beads Fit For Beadable Pens|9|H1-04-06
+FS2496-30PCS|FS2496-17×23mm Clear Cube Acrylic Based Beads Fit For Beadable Pens|10|H1-04-07
+FS2601-1PCS|FS2601-5.3×6cm Long Square Mirror Alloy Patch For Making Fancy Beads For DIY Project|6|H1-05-01
+FS4354-Rose Pink-5PCS|FS4354-Diamond Alloy Charms|4|H1-05-03
+FS6193-Gold-20 PCS|10*27mm Oval Charms With Pearl Pendants, Oval Marquise Metal Patches|8|H1-05-04
+FS6148-10PCS|FS6148- 24*35mm Clear Rounded Rectangular Plate Based Beads Transparent Rounded Rectangular Base Beads|20|H1-05-05
+FS1286-20PCS|FS1286-36MM Violent Bear Shaker Acrylic Beads Fit For Beadspen|5|H1-05-06
+FS1501-20PCS|FS1501- 25mm Long Three-Sided Diamond Based Beads|14|H1-05-07
+FS6002-White-10PCS|FS6002- 34*40mm Horse - eye Diamond Love - shaped Pendant With Three Drop - shaped Charms|6|H1-06-01
+FS6013-Purple-10PCS|FS6013- Butterfly Combined With Gold Patches|5|H1-06-03
+FS6193-Silver-20 PCS|10*27mm Oval Charms With Pearl Pendants, Oval Marquise Metal Patches|1|H1-06-04
+FS0622-10PCS|FS0622- 25MM Heart Plate Base Beads 12MM Thickness Fit For Beadable Pens|20|H1-06-05
+FS0396-10PCS|FS0396- 20mm Pumpkin Beads|10|H1-06-06
+FS5749-50PCS|FS5749-16*20mm Butterfly Based Beads|6|H1-06-07
+FS6002-Purple-10PCS|FS6002- 34*40mm Horse - eye Diamond Love - shaped Pendant With Three Drop - shaped Charms|5|H1-07-01
+FS6346-Purple-5PCS|FS6346- 55×33mm Butterfly Moon Metal Beads Butterfly Moon Metal Patches|3|H1-07-02
+FS5692-White-10PCS|FS5692- 28*41Mm Full-diamond Christmas Tree Charms With Hole|4|H1-07-03
+FS0903-White-5PCS|FS0903-Peacko Diamond Metal Patch For Making Fancy Beads|33|H1-07-04
+FS0611-10PCS|FS0611- 22MM Octagonal Base Beads 15MM Thickness Fit For Beadable Pens|10|H1-07-05
+FS0883-10PCS|FS0883- 25*30MM Clear Balloon Based Beads Fit For Beadable Pens|10|H1-07-06
+FS2444-20PCS|FS2444- Round Shakes for making fancy shake Beads Fit Pens|11|H1-07-07
+FS6002-Pink-10PCS|FS6002- 34*40mm Horse - eye Diamond Love - shaped Pendant With Three Drop - shaped Charms|7|H1-08-01
+FS6192-Blue-6PCS|FS6192- 64×41mm Fan Metal Charms Painted Colorful Fan Metal Patches|12|H1-08-02
+FS5729-5PCS|FS5729- Sunflower Alloy Patch|5|H1-08-03
+FS0903-Grey-5PCS|FS0903-Peacko Diamond Metal Patch For Making Fancy Beads|34|H1-08-04
+FS0832-10PCS|FS0832-17MM Pumpkin Clear Round Based Beads|6|H1-08-05
+FS0616-10PCS|FS0616- 38MM Rectangular Based Beads 9MM Thickness Fit For Beadable Pens|8|H1-08-06
+FS5319-20PCS|FS5319- 13*20mm Oval Transparent Base Beads|14|H1-08-07
+FS3848-25 PCS|8MM AB Silver Spacer Pendant|1|H1-09-01
+FS6192-Red-6PCS|FS6192- 64×41mm Fan Metal Charms Painted Colorful Fan Metal Patches|12|H1-09-02
+FS0656-10PCS|FS0656-10PCS 39MM Six petal flower alloy patch|6|H1-09-03
+FS0903-Pink-5PCS|FS0903-Peacko Diamond Metal Patch For Making Fancy Beads|32|H1-09-04
+FS0829-20PCS|FS0829-16MM Disco Clear Disco Based Beads Fit For Beadable Pens|11|H1-09-05
+FS6123-30PCS|FS6123- 18.5*12mm Elliptical Clear Based Beads Fit For Pen|16|H1-09-06
+FS3898-10PCS|FS3898- 27mm Clear Based Beads Fit Pens - Transparent Oval Beads With Angular Bottom, Pen-Compatible|9|H1-09-07
+FS5416-Pink-2PCS|FS5416- HK Alloy Mirror Patches|4|H1-10-01
+FS0631-10 PCS|Mixed Butterfly Wing Alloy Patch 39mm For Making Fancy Beads|15|H1-10-02
+FS6012-Silver-5PCS|FS6012-Rabbit Metal Five Hooks|6|H1-10-03
+FS0903-DarkPink-5PCS|FS0903-Peacko Diamond Metal Patch For Making Fancy Beads|22|H1-10-04
+FS0621-10PCS|FS0621- 26MM Heart Plate Based Beads 15MM Thickness Fit For Beadable Pens|7|H1-10-05
+FS0609-20PCS|FS0609- 26MM Diamond Base Beads 11MM Thickness Fit For Beadable Pens|28|H1-10-07
+FS2599-Sliver-2PCS|FS2599-57×57mm Sliver Heart Mirror Alloy Patch For Making Fancy Beads|10|H1-11-01
+FS2599-Gold-2PCS|FS2599-57×57mm Sliver Heart Mirror Alloy Patch For Making Fancy Beads|5|H1-11-02
+FS6009-Gold-5PCS|FS6009- Five Hanging Metal Lanterns With Bent Rabbit Ears|8|H1-11-03
+FS5873-Pink-1 PCS|Night-Glow Soft Flower Tassel Pendant|6|H1-11-04
+FS0871-10PCS|FS0871-33MM Clear  Bell Shaker Box Fit For Beadablepen|11|H1-11-05
+FS6155-20PCS|FS6155- 33*39Mm Mickey Head Plate Based Beads|6|H1-11-06
+FS1205-10PCS|FS1205- 29MM Hot Air Balloon Shaker Fit For Beadable Pens|9|H1-11-07
+FS6573-Pink-5PCS|FS6573- About 51*40mm Full Diamond Butterfly Metal Patch|5|H1-12-01
+FS6013-Pink-10PCS|FS6013- Butterfly Combined With Gold Patches|5|H1-12-02
+FS6009-Rose Gold-5PCS|FS6009- Five Hanging Metal Lanterns With Bent Rabbit Ears|6|H1-12-03
+FS5875-2PCS|FS5875- Zircon Fringe Pendant|12|H1-12-04
+FS3579-10PCS|FS3579- 35×47mm One Hole Moon Beads Single - Hole Transparent UV Moon Acrylic|4|H1-12-05
+FS0623-10PCS|FS0623- 22MM Heart Plate Base Beads 12MM Thickness Fit For Beadable Pens|12|H1-12-06
+FS1288-20PCS|FS1288-42MM Moon Shakes Joy  Acrylic Beads Fit For Beadable Pens|3|H1-12-07
+FS5968-5PCS|FS5968- 29*33Mm Grape Alloy Charms|10|H1-13-01
+FS5427-5PCS|FS5427- 50*56mm Flower With Leaf Metal Charms Pearl And Diamond-Added Flower Alloy Patches With Leaves|8|H1-13-02
+FS6007-Gold-4PCS|FS6007- Double Dragon Basket Lantern Metal Six-Hanging|6|H1-13-03
+FS6007-Rose Gold-4PCS|FS6007- Double Dragon Basket Lantern Metal Six-Hanging|2|H1-13-04
+FS3028-10PCS|FS3028- 18×22mm Half Round Beads With Wavy Edges|10|H1-13-05
+FS5454-Mixed Color-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|6|H1-13-06
+FS0875-ClearBlue10PCS|FS0875-Mickey Head Clear Shaker Box For Making Fancy Bead|28|H1-13-07
+FS5426-10PCS|FS5426- 34*56Mm Heart Star Metal Charms Hollow-Out Heart And Five-Pointed Star Alloy Patches|8|H1-14-01
+FS3630-1-20 Pieces|FS3630- 20mm Flower Metal Charms Five - Petal Small Drop - Shaped Flower Metal Patches|4|H1-14-02
+FS5677-4PCS|FS5677- Lotus Lantern Base With Hanging Holes, Without Lamp|5|H1-14-03
+FS6007-Silver-4PCS|FS6007- Double Dragon Basket Lantern Metal Six-Hanging|7|H1-14-04
+FS0872-10PCS|FS0872-35*28MM Cat Head Clear Box Shaker Acrylic Beads Fit For Beadable Pens|8|H1-14-05
+FS0882-10PCS|FS0882- 33*31MM Clothes Based Beads Fit For Beadable Pens|7|H1-14-06
+FS0875-ClearPurple10PCS|FS0875-Mickey Head Clear Shaker Box For Making Fancy Bead|27|H1-14-07
+FS0317-Purple-20 Pieces|FS0317- 33MM Butterfly With Diamonds and Pearls Fancy Charms Accessories For Making Fancy Beads|4|H1-15-01
+FS3630-2-20 Pieces|FS3630- 20mm Flower Metal Charms Five - Petal Small Drop - Shaped Flower Metal Patches|5|H1-15-02
+FS6950-40PCS|FS6950-12MM Round Tray Base|3|H1-15-03
+FS0625-40PCS|FS0625-17MM Heart Plate Base Beads 8MM Thickness Fit For BeadablePens|15|H1-15-04
+FS3584-10PCS|FS3584- Head Shakes Beads Double-Braided Head Shaking Fun|12|H1-15-05
+FS5931-20PCS|FS5931- 24*30mm White 5 Hole DIY Book Page Acrylic DIY Five-Hole White-Background Book Pages|6|H1-15-06
+FS0875-ClearRed10PCS|FS0875-Mickey Head Clear Shaker Box For Making Fancy Bead|25|H1-15-07
+FS0317-Mixed-20 Pieces|33MM Butterfly With Diamonds and Pearls Fancy Charms Accessories For Making Fancy Beads|8|H1-16-01
+FS1401-Gold-20PCS|FS1401-Metal Plum Patch For Making Fancy Beads|8|H1-16-02
+FS6101-20PCS|FS6101- 16mm Metal Based Beads With Hanging Holes|9|H1-16-03
+FS3585-20PCS|FS3585-27*33mm Heart Shakes Beads Love Shake Fun|2|H1-16-04
+FS1302-10PCS|FS1302-51mm Candy Shakes Candy Shakers|14|H1-16-05
+FS5239-50PCS|FS5239-13*17mm Clear Small Butterfly Based Beads|6|H1-16-06
+FS6451-50PCS|FS6451-30×40mm Ckear Acrylic Note Book Charms|12|H1-16-07
+FS10032-1-1 Pieces|16mm Sugar Beads With Bow|8|H10-01-01
+FS10048-5 PCS|18mm Latern Fancy Beads-5 PCS|6|H10-01-02
+FS10049-10 PCS|18mm Soft Flower Metal Spacer Fit For Beadable Pens-10 PCS|4|H10-01-03
+FS10057-2-10PCS|32mm Glowing Flocked Rose Flower For Making Fancy Beads|10|H10-01-04
+FS10067-250 PCS|6mm Galaxy Resin Beads Making Keychain Jewelry Making (hole Not For Pen)-250 PCS|8|H10-01-05
+FS0387-20 PCS|27MM Round Plate Based Beads|0|H10-01-06
+FS10161-Mixed-10PCS|About 40mm Size Random Mixed Color Key Ring For Making Keychain|5|H10-01-07
+FS10032-2-1 Pieces|16mm Sugar Beads With Bow|8|H10-02-01
+FS10047-20 PCS|16mm Leopard Printed Flocked Acrylic Beads Fit For Beadable Pens-20 PCS|6|H10-02-02
+FS10050-10 PCS|20mm Crystal Heart Metal Spacer Fit For Beadable Pens-10 PCS|7|H10-02-03
+FS10057-3-10PCS|32mm Glowing Flocked Rose Flower For Making Fancy Beads|9|H10-02-04
+FS10068-250 PCS|6mm Cat Eye Resin Beads For Making Keychain Jewelry Making (Hole Is Not For Pens)-250 PCS|9|H10-02-05
+FS1652-20 PCS|20*34MM UV Star Butterfly Bow Acrylic Beads|6|H10-02-06
+FS10161-Sliver-10PCS|About 40mm Size Random Mixed Color Key Ring For Making Keychain|9|H10-02-07
+FS10032-3-1 Pieces|16mm Sugar Beads With Bow|6|H10-03-01
+FS10046-10 PCS|15mm Hard Flower Metal Spacer Bead-10 PCS|5|H10-03-02
+FS10051-10 PCS|20mm Flower Resin Beads Fit For Pen-10 PCS|6|H10-03-03
+FS10057-4-10PCS|32mm Glowing Flocked Rose Flower For Making Fancy Beads|9|H10-03-04
+FS10069-20 PCS|12×20mm UV Coating HK Resin Beads For Beadable Pens Keychain Makin-20 PCS|0|H10-03-05
+FS3847-25 PCS|8MM Silver Spacer Pendant|5|H10-03-06
+FS10161-Gold-10PCS|About 40mm Size Random Mixed Color Key Ring For Making Keychain|7|H10-03-07
+FS10052-5 PCS|25mm Color Changing One Hole Resin Beads For Pendant Making-5 PCS|9|H10-04-03
+FS10057- 1-10PCS|32mm Glowing Flocked Rose Flower For Making Fancy Beads|7|H10-04-04
+FS10070-5 PCS|30×40mm HK Flocked Acrylic Beads For Beadable Pens Keychain Making-5 PCS|8|H10-04-05
+FS1115-10-125g|2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|3|H10-04-06
+FS6555-8-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|1|H10-04-07
+FS6555-10-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|1|H10-04-07
+FS6555-7-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|1|H10-04-07
+FS6555-1-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|3|H10-04-07
+FS10031-2-1 PCS|16mm Sugar Beads With Bow For Beadable Pens Keychain Making|4|H10-05-01
+FS10044-5 Pieces|About 23mm 3D HK Hand Painted Acrylic Beads For Keychain Beadable Pens Making-5 Pieces|1|H10-05-02
+FS10053-20 PCS|30*36MM Fine Flashing Bow Patch-20 PCS|7|H10-05-03
+FS10031-9-1 PCS|16mm Sugar Beads With Bow For Beadable Pens Keychain Making|2|H10-05-04
+FS10071-5 PCS|HK Sanrio Flocked Book Resin Beads For Beadable Pens Keychain Making-5 PCS|9|H10-05-05
+FS1124-2-125 g|1.5MM Clear Sugar Diamonds|4|H10-05-06
+FS6555-11-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|2|H10-05-07
+FS6555-5-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|3|H10-05-07
+FS6555-3-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|1|H10-05-07
+FS10031-3-1 PCS|16mm Sugar Beads With Bow For Beadable Pens Keychain Making|3|H10-06-01
+FS10043-10 Pieces|HK Bow Hand Painted Acrylic Beads For Keychain Beadable Pen Making-10 Pieces|10|H10-06-02
+FS10054-1-10 PCS|Flocked Glowing Resin Bow Patch For Making Fancy Beads|5|H10-06-03
+FS10058-2-100 g|4cm T-Shape Pin For Jewelry Making|8|H10-06-04
+FS10072-10 PCS|Glitter Cherry Resin Patch For Making Fancy Beads Pendant-10 PCS|8|H10-06-05
+FS5335-20 PCS|27MM Heart Based Beads Fit For Pen|7|H10-06-06
+FS6555-9-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|3|H10-06-07
+FS6555-4-300PCS|About 6mm Crystal Heart Nail Charms For Making Nail Art Fancy Beads Pens|3|H10-06-07
+FS10054-2-10 PCS|Flocked Glowing Resin Bow Patch For Making Fancy Beads|9|H10-07-03
+FS10059-40PCS|About 9×19mm Ring For Making Keychain-40PCS|19|H10-07-04
+FS10073-20 PCS|Random Mixed HK Printed Acrylic Beads For Beadablea Pens Keychain Making-20 PCS|3|H10-07-05
+FS5253-6 PCS|20MM  Clay Beads With Flower|2|H10-07-06
+FS1441-10-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|16|H10-07-07
+FS10041-2-10 Pieces|HK Butterfly Hand-Painted Beads|9|H10-08-02
+FS10055-1-1 PCS|Strawberry Girl Fancy Beadable Pens|5|H10-08-03
+FS10060-10 PCS|10mm Metal Flower Spacer With Connector For Beadable Pens Jewelry Making-10 PCS|1|H10-08-04
+FS10074-5 PCS|Random Mixed SP 44mm Resin Beads For Beadable Pens Keychain Making|5|H10-08-05
+FS6218-20 PCS|32MM Clear Five Petal Flower Based Beads|5|H10-08-06
+FS1441-11-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|19|H10-08-07
+FS10031-6-1 PCS|16mm Sugar Beads With Bow For Beadable Pens Keychain Making|2|H10-09-01
+FS10041-1-10 Pieces|HK Butterfly Hand-Painted Beads|10|H10-09-02
+FS10055-2-1 PCS|Strawberry Girl Fancy Beadable Pens|5|H10-09-03
+FS10061-10 PCS|12mm Glowing Soft Flower Metal Spacer With Connector For Making Bracelet Beadable Pens-10 PCS|1|H10-09-04
+FS10075-20 PCS|Random Mix Strawberry Girl Acrylic Beads For Beaded Pen Keychain Making-20 PCS|1|H10-09-05
+FS7000-300 PCS|Tiny Butterfly Acrylic Patch|8|H10-09-06
+FS10170-Mixed-20pcs|FS10170-Colored Baking Paint UV Metal Keychain|4|H10-09-07
+FS10031-7-1 PCS|16mm Sugar Beads With Bow For Beadable Pens Keychain Making|2|H10-10-01
+FS10040-5 Pieces|HK 3D Hand-Painted Beads-5 Pieces|5|H10-10-02
+FS2317-2-500PCS|2.3mm Head Length 20mm Pin For Making Valley Of Lily For DIY Project|10|H10-10-03
+FS10062-10 PCS|20mm Cloud Glowing Resin Beads For Beadable Pens Making Keychain Making-10 PCS|6|H10-10-04
+FS10076-5 PCS|Random Mixed UV Coating Hamburger Resin Beads For Beadable Pens Keychain Making-5 PCS|16|H10-10-05
+FS10173-Mixed-20PCS|FS10173-25mm UV Mixed Color Keychain|9|H10-10-07
+FS10039-5 Pieces|HK 3D Hand-Painted Beads-5 Pieces|7|H10-11-02
+FS5083-1-1 Bags|Toothed Crimps Ends|5|H10-11-03
+FS10063-10 PCS|20mm Dried Flower UV Coating Resin Beads For Beadable Pens Keychain Making-10 PCS|9|H10-11-04
+FS10077-5 PCS|Chiikikawa Flocked Resin Beads For Beadable Pens Keychain Makings-5 PCS|8|H10-11-05
+FS10174-Mixed-20PCS|FS10174-20mm Keychain with Diamonds|9|H10-11-07
+FS4011-2-100 PCS|15MM Jump Ring|9|H10-12-03
+FS10064-5 PCS|25mm UV Coating Flower Resin Beads For Pendant Making-5 PCS|10|H10-12-04
+FS10078-1-2 PCS|Lace Rope For Making Keychain|0|H10-12-05
+FS10156-White-50g|6mm Holeless Pearl|5|H10-12-07
+FS10034-1-1 Pieces|16mm Sugar Beads With Bow|7|H10-13-01
+FS5018-1-100 PCS|6MM Alloy Hollow Beads|1|H10-13-03
+FS10065-5 PCS|25mm Glowing Cloud ResinBeads For Beadable Pens Keychain Making-5 PCS|8|H10-13-04
+FS10083-200 PCS|12mm Random Mixed Color Ring For Making Keychain Jewelry Making-200 PCS|7|H10-13-06
+FS10157-10 PCS|About 32mm Wavy Square Clear Based Beads|6|H10-13-07
+FS10034-2-1 Pieces|16mm Sugar Beads With Bow|8|H10-14-01
+FS10038-2-1 Pieces|16mm Pearl With Bow|1|H10-14-02
+FS5018-2-100 PCS|6MM Alloy Hollow Beads|4|H10-14-03
+FS10066-20 PCS|Mixed UV Chocolate Resin Beads-20 PCS|0|H10-14-04
+FS10078-3-2 PCS|Lace Rope For Making Keychain|0|H10-14-05
+FS10084-25 PCS|14×22mm Random Mixed Ice Cream UV Coating Acrylic Beads For Beadable Pens Keychain Making-25 PCS|4|H10-14-06
+FS10158-10PCS|About 20×30mm Clear Based Beads|17|H10-14-07
+FS2362-1-100 PCS|5CM Metal Chain|4|H10-15-03
+FS6504-2000 PCS|2MM Gold Spacer|3|H10-15-04
+FS10085-20 PCS|16mm Random Mixed Jelly Color Acrylic Beads For Beadable Pens Keychain Making-20 PCS|10|H10-15-06
+FS10159-10PCS|Mixed SP Acrylic Beads|3|H10-15-07
+FS10034-4-1 Pieces|16mm Sugar Beads With Bow|9|H10-16-01
+FS10037-10 Pieces|Random Mix Molly Acrylic Printed Beads For Making Keychain Beaded Pen-10 Pieces|2|H10-16-02
+FS2362-2-100 PCS|5CM Metal Chain|10|H10-16-03
+FS2097-7-125g|2mm Silver bottom Diamonds Sugar|17|H10-16-04
+FS2370-1-500 PCS|10MM Jump Ring|1|H10-16-05
+FS10086-20 PCS|Random Mixed Solid Color UV Coating Printed Acrylic Beads For Beadable Pens Keychain Making-20 PCS|9|H10-16-06
+FS10160-200PCS|12mm K-Pop Nail Charms|8|H10-16-07
+FS10034-5-1 Pieces|16mm Sugar Beads With Bow|4|H10-17-01
+FS6577-2-50PCS|13mm  Gold-Plated Or Silver-Plated Wavy Spacer Beads|8|H10-17-03
+FS1301-Silver-4 Meters|0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H10-17-04
+FS10087-20 PCS|16mm Random Mixed Clear Nike Shoes Acrylic Beads For Beadable Pens Keychain Making-20 PCS|10|H10-17-06
+FS10164-10PCS|3D luminous Totoro Beads Fit For Pen|3|H10-17-07
+FS10035-1-1 Pieces|16mm Sugar Beads With Bow|6|H10-18-01
+FS10036-6-1 Pieces|16mm Sugar Beads With Flower|1|H10-18-02
+FS5423-500 PCS|5.2MM Pearl Beads Fit For Pen|8|H10-18-03
+FS1124-1-125 g|1.5MM Clear Sugar Diamonds|18|H10-18-04
+FS10088-10 PCS|20mm Strawberry Clay Beads For Beadable Pens Keychain Making-10 PCS|5|H10-18-06
+FS10175-Mixed-20PCS|FS10175-Approximately 21mm Four-Leaf Clover Mixed Color Keychain|10|H10-18-07
+FS10035-2-1 Pieces|16mm Sugar Beads With Bow|6|H10-19-01
+FS10036-5-1 Pieces|16mm Sugar Beads With Flower|0|H10-19-02
+FS6307-20 Pieces|16MM Pepsi Beads|3|H10-19-03
+FS1115-7-125g|2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|18|H10-19-04
+FS10089-10 PCS|About 21×26mm Sitting HK Resin Beads For Making Keychain Beadable Pens-10 PCS|1|H10-19-06
+FS10176-Mixed-20PCS|FS10176-Approximately 37×13×8mm Random Mixed Color Keychain|8|H10-19-07
+FS10036-4-1 Pieces|16mm Sugar Beads With Flower|0|H10-20-02
+FS5589-1000 PCS|5MM Pearl Beads Fit For Pen|6|H10-20-03
+FS1115-8-125g|2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|19|H10-20-04
+FS3619-1-200 PCS|12MM Jump Ring|7|H10-20-05
+FS10167-Silver-20pcs|FS10167-14mm Alloy Beads with Diamonds|2|H10-20-06
+FS10177-Mixed-6PCS|FS10177-Strawberry Girl Pen Cap|5|H10-20-07
+FS10035-4-1 Pieces|16mm Sugar Beads With Bow|2|H10-21-01
+FS10036-3-1 Pieces|16mm Sugar Beads With Flower|3|H10-21-02
+FS1267-20 PCS|14MM Pearl Acrylic Beads|10|H10-21-03
+FS1115-9-125g|2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|19|H10-21-04
+FS3619-2-200 PCS|12MM Jump Ring|5|H10-21-05
+FS10169-Mixed-30pcs|FS10169-18×11mm Double Lobster Clasp|5|H10-21-06
+FS10187-RhodiumPlated -20PCS|FS10187-35×50mm Three-Dimensional Double-Layer Butterfly Metal Base|9|H10-21-07
+FS10036-2-1 Pieces|16mm Sugar Beads With Flower|3|H10-22-02
+FS5772-10 PCS|Duckbill Clip|88|H10-22-03
+FS1354-1-500 PCS|5*10mm Horse-Eye Petals|5|H10-22-04
+FS10058-1-100 g|4cm T-Shape Pin For Jewelry Making|8|H10-22-05
+FS10169-Silver-30pcs|FS10169-18×11mm Double Lobster Clasp|6|H10-22-06
+FS10187-Silver-20PCS|FS10187-35×50mm Three-Dimensional Double-Layer Butterfly Metal Base|5|H10-22-07
+FS10035-6-1 Pieces|16mm Sugar Beads With Bow|2|H10-23-01
+FS10036-1-1 Pieces|16mm Sugar Beads With Flower|3|H10-23-02
+FS6144-300 PCS|8MM Luminous Soft Flower Charms|2|H10-23-03
+FS1354-2-500 PCS|5*10mm Horse-Eye Petals|6|H10-23-04
+FS2218-20 PCS|36.6*22MM UV Solid Butterfly Bow Acrylic Beads|1|H10-23-05
+FS10169-Gold-30pcs|FS10169-18×11mm Double Lobster Clasp|6|H10-23-06
+FS10187-Gold-20PCS|FS10187-35×50mm Three-Dimensional Double-Layer Butterfly Metal Base|7|H10-23-07
+FS10035-7-1 Pieces|16mm Sugar Beads With Bow|5|H10-24-01
+FS10035-8-1 Pieces|16mm Sugar Beads With Bow|6|H10-24-02
+FS1354-3-500 PCS|5*10mm Horse-Eye Petals|6|H10-24-04
+FS6769-300 PCS|6*6MM Square White BackGround Character English Letter Acrylic Beads|7|H10-24-05
+FS10079-1000 PCS|7mm Hollow Flower Spacers For Jewelry Making-1000 PCS|4|H10-24-06
+FS6734-10PCS|FS6734-20mm Strawberry Girl Printed Acrylic Beads|6|H10-24-07
+FS5651-10 Pieces|FS5651-Cylindrical cake Based bead|4|H11-01-01
+FS6871-White-2 PCS|FS6871-14.5*2.2CM Plush ball bead mountain buckle|4|H11-01-02
+FS0245-9-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|4|H11-01-03
+FS4569-10 Meters|FS4569-2mm Diamonds 2 Row Chain|5|H11-01-04
+FS1432-Green-10PCS|FS1432-UV Beadable Pens|2|H11-01-05
+FS4887-5 Pieces|FS4887-3D MiniMilk Dragon PenToppers|4|H11-01-06
+FS5916-12-1 PCS|FS5916-12-1-Bead art knife|7|H11-01-07
+FS3672-1 Pieces|FS3672--Bamboo Square Bracelet Plate(With Base)|9|H11-02-01
+FS6871-Yellow-2 PCS|FS6871-14.5*2.2CM Plush ball bead mountain buckle|2|H11-02-02
+FS0245-10-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|10|H11-02-03
+FS4344-10 Pieces|FS4344-Clear Bear Shakes Base Beads|18|H11-02-04
+FS4219-Brown-5PCS|FS4219-Beadable Pen With Tube|6|H11-02-05
+FS1665-10 Pieces|FS1665-Glowing StarBucks Pen Toppers|3|H11-02-06
+FS5916-1-1 PCS|FS5916-1-1-Bead art knife|6|H11-02-07
+FS3674-1 Pieces|FS3674-Bamboo circular bracelet plate(With Base)|4|H11-03-01
+FS6871-Green-2 PCS|FS6871-14.5*2.2CM Plush ball bead mountain buckle|3|H11-03-02
+FS0245-11-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|8|H11-03-03
+FS0831-20 Pieces|FS0831-22MM Clear Rectangle Base Beads|14|H11-03-04
+FS4219-Red-5PCS|FS4219-Beadable Pen With Tube|1|H11-03-05
+FS6865-9 Pieces|FS6865-Inside Out Mini Figure Pen Toppers|10|H11-03-06
+FS5916-2-1 PCS|FS5916-2-1-Bead art knife|16|H11-03-07
+FS3675-1 Pieces|FS3675-Bamboo Square Bracelet Plate|5|H11-04-01
+FS4244--1--1 Pieces|FS4244-DIY Beaded Zipper Pull|4|H11-04-02
+FS1325-100 pieces|FS1325-15MM Flower Spacer|5|H11-04-03
+FS6164-30 Pieces|FS6164-14MM Pumpkin Base Beads|7|H11-04-04
+FS4219-Green-5PCS|FS4219-Beadable Pen With Tube|11|H11-04-05
+FS5884-5 Pieces|FS5884-42*38MM HeadPhone Pendant|2|H11-04-06
+FS5916-3-1 PCS|FS5916-Bead art knife|9|H11-04-07
+FS5802-1 Pieces|FS5802-Wooden pliers storage base|6|H11-05-01
+FS4244--2--1 Pieces|FS4244-DIY Beaded Zipper Pull|6|H11-05-02
+FS1323-Silver-100PCS|FS1323-14MM Sliver Flower Spacer Fit For Beadable Pens|3|H11-05-03
+FS0398-40 Pieces|FS0398-14MM Square Diagonal Hole Beads|8|H11-05-04
+FS4219-Blue-5PCS|FS4219-Beadable Pen With Tube|9|H11-05-05
+FS5797-10 Pieces|FS5797-Middle Size DIY Elastic Rubber Bands|6|H11-05-06
+FS5916-5-1 PCS|FS5916-Bead art knife|10|H11-05-07
+FS10008-9P|FS10008 Wool Bear Small Ornaments Cute Cartoon Doll Ornaments|3|H11-06-01
+FS4244--3--1 Pieces|FS4244-DIY Beaded Zipper Pull|6|H11-06-02
+FS0620-10 Pieces|FS0620-30MM Octagonal Base bead|8|H11-06-04
+FS1814-Shiny Gold-500PCS|FS1814-2.5mm Sliver Crimp Beads For Making Keychain|11|H11-06-05
+FS6932-1 Roll|FS6932-0.5MM Gold Steel Wire|8|H11-06-06
+FS5916-6-1 PCS|FS5916-Bead art knife|6|H11-06-07
+FS10011-200P|FS10011 Diy Mushroom Hairpin Nail Phone Case Material Patch-200P|6|H11-07-01
+FS4244--4--1 Pieces|FS4244-DIY Beaded Zipper Pull|11|H11-07-02
+FS0017-Silver-500 Pieces|FS0017- 5mm Metal Beads Fit for Beadable Pens|16|H11-07-03
+FS4872-200 Pieces|FS4872-Purple 1MM Length 6CM Pen Refills|10|H11-07-04
+FS1814-Silver-500PCS|FS1814-2.5mm Sliver Crimp Beads For Making Keychain|22|H11-07-05
+FS5796-10 Pieces|FS5796-Small Size DIY Elastic Rubber Bands|6|H11-07-06
+FS5916-7-1 PCS|FS5916-Bead art knife|9|H11-07-07
+FS10015-300P|FS10015 Cartoon Leopard Bow Nail Art Patch-300P|4|H11-08-01
+FS4244--5--1 Pieces|FS4244-DIY Beaded Zipper Pull|11|H11-08-02
+FS1757-100 g|FS1757-3MM+4MM Mixed Pearl Looking Beads(No Hole)|3|H11-08-03
+FS4869-200 Pieces|FS4869-Red 1MM Length 6CM Pen Refills|9|H11-08-04
+FS6930-1 Roll|FS6930-0.7MM Silver Steel Wire|7|H11-08-06
+FS5916-8-1 PCS|FS5916-Bead art knife|11|H11-08-07
+FS10009-9P|FS10009 Cute Doll Cute Mengqiqi Desktop Decorations Small Ornaments-9P|1|H11-09-01
+FS4244--6--1 Pieces|FS4244-DIY Beaded Zipper Pull|3|H11-09-02
+FS2966-White-100 g|FS2966- Broken Glass Sand|4|H11-09-03
+FS6522-10 Set|FS6522-Beadable Empty Tube Quicksand Touch Stylus|9|H11-09-04
+FS3054-100 g|FS3054-4MM Mixed color glass beads|7|H11-09-05
+FS4418-1 Roll|FS4418-0.45MM Silver Steel Wire(About 25M/Roll)|6|H11-09-06
+FS5916-9-1 PCS|FS5916-Bead art knife|5|H11-09-07
+FS4244--7--1 Pieces|FS4244-DIY Beaded Zipper Pull|10|H11-10-02
+FS2966-Silver-100 g|FS2966- Broken Glass Sand|4|H11-10-03
+FS6523-10 Set|FS6523-Beadable Empty Tube QuickSand Touch Stylus|10|H11-10-04
+FS3068-100 g|FS3068-3MM+4MM 3MM Mixed color glass beads|4|H11-10-05
+FS2441-1 Roll|FS2441-Silver Steel Wire(30Meters)|5|H11-10-06
+FS5916-10-1 PCS|FS5916-Bead art knife|6|H11-10-07
+FS1548-Rose Red-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|4|H11-11-01
+FS4244--8--1 Pieces|FS4244-DIY Beaded Zipper Pull|9|H11-11-02
+FS2966-Pink-100 g|FS2966- Broken Glass Sand|21|H11-11-03
+FS6524-10 Set|FS6524-Beadable Empty Tube QuickSand Forever Pencil|9|H11-11-04
+FS3053-Blue-100 g|FS3053-3MM Mixed color glass rice beads|4|H11-11-05
+FS2795-20 Pieces|FS2795-20 Set 20MM Round Shakes Base Beads|9|H11-11-06
+FS5916-11-1 PCS|FS5916-Bead art knife|9|H11-11-07
+FS1548-Khaki-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-12-01
+FS4244--9--1 Pieces|FS4244-DIY Beaded Zipper Pull|11|H11-12-02
+FS2966-Wisteria-100 g|FS2966- Broken Glass Sand|4|H11-12-03
+FS6525-10 Set|FS6525-Beadable Empty Tube QuickSand Forever Pencil|10|H11-12-04
+FS3053-Yellow-100 g|FS3053-3MM Mixed color glass rice beads|5|H11-12-05
+FS6118-250 g|FS6118-Random Mixed White Base Beads|20|H11-12-06
+FS5916-4-1 PCS|FS5916-Bead art knife|8|H11-12-07
+FS1548-CandyYellow-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-13-01
+FS4244--10--1 Pieces|FS4244-DIY Beaded Zipper Pull|4|H11-13-02
+FS2966-Dark Purple-100 g|FS2966- Broken Glass Sand|4|H11-13-03
+FS6526-10 Set|FS6526-Beadable Empty Tube QuickSand Gel Pens|8|H11-13-04
+FS6844-1000 Pieces|FS6844-6MM Dark-Colored Large-Hole Beads (Fit For Pens)|7|H11-13-05
+FS10030-20 PCS|FS10030-16mm Rose Flower Resin Beads For Making Keychain Jewelry Making   -20 PCS|8|H11-13-06
+FS4651-10 Pieces|FS4651- 40mm White Big Round Plate Based Beads|3|H11-13-07
+FS1548-Dark Purple-2 Piece|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|4|H11-14-01
+FS4244--11--1 Pieces|FS4244-DIY Beaded Zipper Pull|4|H11-14-02
+FS4233-4 pieces|FS4233-Spring Retractable Phone Back Clip|14|H11-14-03
+FS6527-10 Set|FS6527-Beadable Empty Tube QuickSand Gel Pens|9|H11-14-04
+FS6931-1 Roll|FS6931-0.3MM Giold Steel Wire|6|H11-14-06
+FS5416-2-2 Pieces|HK Alloy Mirror Patches|8|H11-14-07
+FS1548-Black-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|4|H11-15-01
+FS4244--12--1 Pieces|FS4244-DIY Beaded Zipper Pull|7|H11-15-02
+FS5561-10 Pieces|FS5561-Starbucks Acrylic Beads|6|H11-15-03
+FS10018-20 PCS|FS10018-16mm Glowing Glitter Flower Resin Beads -20 PCS|4|H11-15-04
+FS10028-20 PCS|FS10028-Random Mixed MM Printed Acrylic Beads For Making Keychain Beadable Pens Jewelry Making -20 PCS|0|H11-15-05
+FS2081-40 Pieces|FS2081-13*22MM Fur Spacers|5|H11-15-06
+FS5416-3-2 Pieces|HK Alloy Mirror Patches|5|H11-15-07
+FS1548-Red-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-16-01
+FS4244--13--1 Pieces|FS4244-DIY Beaded Zipper Pull|8|H11-16-02
+FS4235-1 Pieces|FS4235-Spring Retractable Bear Phone Back Clip|30|H11-16-03
+FS10019-20 PCS|FS10019-16mm Color Changing Luminous Flower Resin Beads For Beadable Pens Keychain Jewelry Making -20 PCS|3|H11-16-04
+FS2315-1 Pieces|FS2315-Dog Hanger|12|H11-16-05
+FS0875-White-10 Pieces=5 Set|Mickey Head Clear Shaker Box For Making Fancy Bead|5|H11-16-07
+FS1548-Gold-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-17-01
+FS0245-1-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|12|H11-17-02
+FS4234-2 Pieces|FS4234-Spring Retractable Ellipse Phone Back Clip|23|H11-17-03
+FS10020-20 PCS|FS10020-16mm Color Changing Luminous Lutous Flower Resin Beads  -20 PCS|9|H11-17-04
+FS6786-30 Pieces|FS6786-27MM Crocheted Pearl Small Flower|31|H11-17-05
+FS10026-200 PCS|FS10026-12.5×16.5mm Lily  Flower  Acrylic Beads For Making Car Hanger|4|H11-17-06
+FS10026-2-200 PCS|FS10026-12.5×16.5mm Lily  Flower  Acrylic Beads For Making Car Hanger|4|H11-17-07
+FS1548-Sliver-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-18-01
+FS0245-2-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|10|H11-18-02
+FS4232-1 Pieces|FS4232-Spring Retractable Bear Phone Back Clip|67|H11-18-03
+FS10021-20 PCS|FS10021-16mm Color Changing Luminous Butterfly Resin Beads For Beadable Pens Keychain Jewelry Making   -20 PCS|3|H11-18-04
+FS1491-40 Pieces|FS1491-6MM Ribbon Bow|10|H11-18-05
+FS1208-10 PCS|FS1208-25MM Clear ROUND beads|3|H11-18-06
+FS5887-20 PCS|19*38MM Half Round Plate Beads Pen Topper|6|H11-18-07
+FS1548-Royal Blue-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-19-01
+FS0245-3-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|9|H11-19-02
+FS4236-2 Pieces|FS4236-Spring Retractable Heart Phone Back Clip|24|H11-19-03
+FS10022-40 PCS|FS10022-12mm Mixed Color Resin Beads  For Beadable Pens Keychain Jewelry Making-40 PCS|2|H11-19-04
+FS4656-40 Pieces|FS4656-10MM Velvet bow|10|H11-19-05
+FS0995-20 Pieces|FS0995-About 22-27MM Plush Charms|1|H11-19-06
+FS5424-300 PCS|7MM Rose Pearl Beads Fit For Pen|3|H11-19-07
+FS1548-CandyPink-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-20-01
+FS0245-4-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|10|H11-20-02
+FS4237-4 Pieces|FS4237-Spring Retractable Black Phone Back Clip|23|H11-20-03
+FS0996-Pink-8 Pieces|FS0996-105MM Fabric Flower Charms|8|H11-20-05
+FS1180-20 Pieces|FS1180-35*25*0.75MM Rectangular acrylic Based Beads|3|H11-20-06
+FS3561-100 g|8MM Jump Ring|8|H11-20-07
+FS1548-CandyBlue-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-21-01
+FS0245-5-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|16|H11-21-02
+FS4239-2 Pieces|FS4239-Spring Retractable Wave Phone Back Clip|23|H11-21-03
+FS10024-20 PCS|Random Mixed Totoro Acrylic Beads For Making Keychain -20 PCS|4|H11-21-04
+FS0996-Black-8 Pieces|FS0996-105MM Fabric Flower Charms|6|H11-21-05
+FS0116-10 Pieces|FS0116-30MM Square Based Beads|6|H11-21-06
+FS4011-1-100 PCS|15MM Jump Ring|15|H11-21-07
+FS1548-CandyPurple-2PCS|FS1548-16.2*0.2cm DIY Metal Crocodile Clips with Beadable Keychain Bar Mini Lobster Clasp for Notes Business Card Photo|5|H11-22-01
+FS0245-6-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|9|H11-22-02
+FS1673-RoseGold-1 Pieces|FS1673-Metal Keychain Card Snap-on|6|H11-22-03
+FS10025-20 PCS|Random Mixed Demon Slayer Printed Acrylic Beads For Making Keychain-20 PCS|3|H11-22-04
+FS4198-Purple-1 Pieces|14CM 8 Layer Big Flower Diamonds Charms|6|H11-22-05
+FS0659-40 PCS|FS0659-13MM Clear Round Palte Based Beads Fit For Pen|5|H11-22-06
+FS1586-100 PCS|16MM Star Broken Ring|14|H11-22-07
+FS6871-Orange-2 PCS|FS6871-14.5*2.2CM Plush ball bead mountain buckle|3|H11-23-01
+FS0245-7-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|11|H11-23-02
+FS1673-Gold-1 Pieces|FS1673-Metal Keychain Card Snap-on|9|H11-23-03
+FS1006-Black-200 PCS|FS1006- 8MM  White Flower Nail Charms For Making Fancy Beads Or Fancy Pen|2|H11-23-04
+FS4198-Pink-1 Pieces|FS4198-14CM 8 Layer Big Flower Diamonds Charms|15|H11-23-05
+FS1638-20 PCS|FS1638-Small Metal Crown|1|H11-23-06
+FS20251213-1 PCS|Natural Mountain Spring Water From QianDao Lake-1 PCS|10|H11-23-07
+FS6871-Purple-2 PCS|FS6871-14.5*2.2CM Plush ball bead mountain buckle|3|H11-24-01
+FS0245-8-1 Pieces|FS0245-DIY Bead Mountaineering Carabiner|5|H11-24-02
+FS1673-Black-1 Pieces|FS1673-Metal Keychain Card Snap-on|8|H11-24-03
+FS1006-White-200 PCS|FS1006- 8MM  White Flower Nail Charms For Making Fancy Beads Or Fancy Pen|2|H11-24-04
+FS4198-White-1 Pieces|FS4198-14CM 8 Layer Big Flower Diamonds Charms|9|H11-24-05
+FS2342-P70-10PCS||13|H12-01-01
+FS2342-P64-10PCS||1|H12-01-02
+FS6396-Purple-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-01-03
+FS6396-Dark Green-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|10|H12-01-03
+FS5872-16|FS5872-10 Pieces P9.5*14cm Phone Chain Card|10|H12-01-04
+FS5711-White-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|25|H12-01-05
+FS6759-300 Pieces|FS6759-4*7MM White Black Acrylic English Letter Beads|11|H12-01-06
+FS2007-20PCS|FS2007- 72mm Regular Length Stainless Steel Metal Rod For Beadable Pens|34|H12-01-07
+FS2342-P79-10PCS||8|H12-02-01
+FS2342-P42-10PCS||1|H12-02-02
+FS6396-Blue Purple-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|4|H12-02-03
+FS6396-White and Colorful-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-02-03
+FS1432-Macron Pink|FS1432-UV Beadable Pen|2|H12-02-04
+FS5711-Yellow-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|34|H12-02-05
+FS6761-300 Pieces|FS6761-4*7MM White Black Acrylic Number Beads|5|H12-02-06
+FS5552-20PCS|FS5552-97mm Metal Medium Long Extension Rod For Pens|52|H12-02-07
+FS2342-P54-10PCS||3|H12-03-01
+FS2342-P72-10PCS||11|H12-03-02
+FS6396-Red-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-03-03
+FS6396-Pale Blue-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|10|H12-03-03
+FS1432-Macron Light Blue|FS1432-UV Beadable Pen|0|H12-03-04
+FS5711-Orange-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|34|H12-03-05
+FS6758-300PCS|FS6758-4*7MM Transparent Colored Acrylic English Letter Beads|10|H12-03-06
+FS5942-Red-5Meters|FS5942-5CM Colorful Dot Polyester Rope|7|H12-03-07
+FS2342-P7-10PCS||7|H12-04-01
+FS2342-P63-10PCS||6|H12-04-02
+FS6396-Pale Pink-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|6|H12-04-03
+FS6396-Yellow-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-04-03
+FS1432-Macron Orange|FS1432-UV Beadable Pen|2|H12-04-04
+FS5711-Pink-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|28|H12-04-05
+FS6191-1000 Pieces|FS6191-4MM UV Purple Glass Beads|6|H12-04-07
+FS2342-P45-10PCS||11|H12-05-01
+FS2342-P25-10PCS||3|H12-05-02
+FS6546-Rose Red Ink-200 Pieces|Pen Point  6CM Length  Refills For Beadable Pens FS4869  FS4870 FS4871 FS4872 FS0300|3|H12-05-03
+FS4219-Purple-5PCS|FS4219-Beadable Pen With Tube|3|H12-05-04
+FS5711-Purple-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|24|H12-05-05
+FS5679-Purple--300 Pieces|FS5679-6MM UV 5-Petals Small Flower Charms With Diamonds|25|H12-05-06
+FS6190-1000 Pieces|FS6190-4MM UV Glass Beads|8|H12-05-07
+FS2342-P56-10PCS||2|H12-06-01
+FS2342-P18-10PCS||6|H12-06-02
+FS6548-Yellow Ink-200 Pieces|Pen Point  6CM Length  Refills For Beadable Pens FS4869  FS4870 FS4871 FS4872 FS0300|3|H12-06-03
+FS1432-Purple|FS1432-UV Beadable Pen|6|H12-06-04
+FS5711-Red-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|28|H12-06-05
+FS5679-Pink--300 Pieces|FS5679-6MM UV 5-Petals Small Flower Charms With Diamonds|20|H12-06-06
+FS2569-500 Pieces|FS2569-Pearl Star Spacer Bead|6|H12-06-07
+FS2342-P58-10PCS||7|H12-07-01
+FS2342-P67-10PCS||4|H12-07-02
+FS6547-Green Ink-200 Pieces|Pen Point  6CM Length  Refills For Beadable Pens FS4869  FS4870 FS4871 FS4872 FS0300|5|H12-07-03
+FS4219-Orange-5PCS|FS4219-Beadable Pen With Tube|5|H12-07-04
+FS5711-Green-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|28|H12-07-05
+FS6568-PinkBlue-300 Pieces|FS6568-8MM Luminous Soft Flower Charms|2|H12-07-06
+FS1740-1000 Pieces|FS1740-4MM Clear Acrylic Beads(Not For Pens)|12|H12-07-07
+FS2342-P77-10PCS||11|H12-08-01
+FS2342-P55-10PCS||10|H12-08-02
+FS5872-12|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-08-03
+FS4219-Gold-5PCS|FS4219-Beadable Pen With Tube|6|H12-08-04
+FS5711-Blue-300 Pieces|FS5711-8.3MM Four-Petals Heart Flower Charms With Diamonds|33|H12-08-05
+FS6568-Green-300 Pieces|FS6568-8MM Luminous Soft Flower Charms|1|H12-08-06
+FS1547-10 Pieces|FS1547-Santa Claus Silicone Flat Beads|13|H12-08-07
+FS2342-P37-10PCS||3|H12-09-01
+FS2342-P23-10PCS||14|H12-09-02
+FS5872-7|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-09-03
+FS4219-Light Blue-5PCS|FS4219-Beadable Pen With Tube|4|H12-09-04
+FS6300-300 Pieces|FS6300-About 9*10MM Luminous Heart Charms|14|H12-09-05
+FS6561-300 Pieces|FS6561-8MM UV Luminous Mabe Small Flower Charms|3|H12-09-06
+FS6014-Blue-5 Meters|FS6014- About 5MM Round Glitter Flake Rope|7|H12-09-07
+FS2342-P36-10PCS||11|H12-10-01
+FS2342-P9-10PCS||7|H12-10-02
+FS5872-8|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-10-03
+FS6941-Green-10PCS|FS6941-Silicone Straw Charms|10|H12-10-04
+FS1517-500 Pieces|FS1517-8MM UV Glowing Rose|5|H12-10-05
+FS6184-500 Pieces|FS6184-10*11M Balloon Dog Charms|8|H12-10-06
+FS6014-Pink-5 Meters|FS6014- About 5MM Round Glitter Flake Rope|7|H12-10-07
+FS2342-P50-10PCS||9|H12-11-01
+FS2342-P75-10PCS||5|H12-11-02
+FS5872-9|FS582-10 Pieces P9.5*14cm Phone Chain Card|5|H12-11-03
+FS6941-Purple-10PCS|FS6941-Silicone Straw Charms|4|H12-11-04
+FS5627-300 Pieces|FS5627-10MM Soft Flower Luminous Charms|5|H12-11-05
+FS2291-Purple-500 Pieces|FS2291-Cream Rose|7|H12-11-06
+FS2234-200PCS|FS2234- 6MM Diamond For Keychain Jewelry Making|14|H12-11-07
+FS2342-P57-10PCS||17|H12-12-01
+FS2342-P15-10PCS||8|H12-12-02
+FS5872-10|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-12-03
+FS6941-Blue-10PCS|FS6941-Silicone Straw Charms|5|H12-12-04
+FS4575-50 Pieces|FS4575-2*20MM Silver Connector With Hook|6|H12-12-05
+FS2291-White--500 Pieces|FS2291-Cream Rose|5|H12-12-06
+FS3543-20 Pieces|FS3543-16MM Flower glitter resin beads|6|H12-12-07
+FS2342-P3-10PCS||7|H12-13-01
+FS2342-P14-10PCS||1|H12-13-02
+FS5872-11|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-13-03
+FS6941-Yellow-10PCS|FS6941-Silicone Straw Charms|5|H12-13-04
+FS2006-20PCS|FS2006- 10 Pieces 117MM Stainless steel Long Extension Rod For Beadable Pens|31|H12-13-05
+FS1514-5 Pieces|FS1514-Mermaid Bookmarks|16|H12-13-06
+FS1353-300 Pieces|FS1353-UV 3 Petals Flower With Diamonds|5|H12-13-07
+FS2342-P68-10PCS||18|H12-14-01
+FS2342-P78-10PCS||4|H12-14-02
+FS5872-13|FS582-10 Pieces P9.5*14cm Phone Chain Card|9|H12-14-03
+FS6941-Rose Red-10PCS|FS6941-Silicone Straw Charms|4|H12-14-04
+FS2279-Red-5 Pieces|FS2279-Heart-Shaped Mirror Pendant|3|H12-14-05
+FS3821-Gold-1 Pieces|FS3821-Metal Out Door Retractable Keychain|8|H12-14-06
+FS1705-20 Pieces|FS1705-16MM Jelly Wrinkle Acrylic Beads|5|H12-14-07
+FS2342-P69-10PCS||1|H12-15-01
+FS2342-P21-10PCS||4|H12-15-02
+FS5872-5|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-15-03
+FS6941-Pink-10PCS|FS6941-Silicone Straw Charms|4|H12-15-04
+FS2279-Black-5 Pieces|FS2279-Heart-Shaped Mirror Pendant|6|H12-15-05
+FS3821-Silver-1 Pieces|FS3821-Metal Out Door Retractable Keychain|9|H12-15-06
+FS1755-50 Pieces|FS1755-12MM Two Tone Gradient Fine Glitter Resin Beads|2|H12-15-07
+FS2342-P71-10PCS||5|H12-16-01
+FS6395-AB White-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|20|H12-16-02
+FS6395-Yellow-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|10|H12-16-02
+FS5872-4|FS582-10 Pieces P9.5*14cm Phone Chain Card|7|H12-16-03
+FS6941-Red-10PCS|FS6941-Silicone Straw Charms|4|H12-16-04
+FS2279-Silver-5 Pieces|FS2279-Heart-Shaped Mirror Pendant|3|H12-16-05
+FS6864-2 Pieces|FS6864-16.8*3.2CM DIY Beaded Pet Comb|11|H12-16-06
+FS4022-100 g|FS4022-2.3MM Crystal Diamonds|14|H12-16-07
+FS2342-P43-10PCS||7|H12-17-01
+FS6395-Black-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|7|H12-17-02
+FS6395-Dark Green-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|11|H12-17-02
+FS5872-15|FS582-10 Pieces P9.5*14cm Phone Chain Card|10|H12-17-03
+FS6941-Orange-10PCS|FS6941-Silicone Straw Charms|5|H12-17-04
+FS2261-Pink-200 Pieces|FS2261-6*8MM Rectangular Mocha Crystal|8|H12-17-05
+FS5310-5 Pieces|FS5310-Beads Hole Expanding Needle|3|H12-17-06
+FS6867-5Pieces|FS6867-40*43MM Big Love Heart Diamond Pendant|6|H12-17-07
+FS2342-P60-10PCS||12|H12-18-01
+FS6395-Crystal Blue-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|9|H12-18-02
+FS6395-Red-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|5|H12-18-02
+FS5872-2|FS582-10 Pieces P9.5*14cm Phone Chain Card|6|H12-18-03
+FS6941-Dark Purple-10PCS|FS6941-Silicone Straw Charms|5|H12-18-04
+FS2261-Blue-200 Pieces|FS2261-6*8MM Rectangular Mocha Crystal|6|H12-18-05
+FS2121-100 Pieces|FS2121-Elk resin patch|10|H12-18-06
+FS0047-20 Pieces|FS0047-60MM Silver Car Hanging Ring|15|H12-18-07
+FS2342-P65-10PCS||1|H12-19-01
+FS6395-Green-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|10|H12-19-02
+FS6395-Champagne-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|10|H12-19-02
+FS5872-6|FS582-10 Pieces P9.5*14cm Phone Chain Card|7|H12-19-03
+FS6941-Grey-10PCS|FS6941-Silicone Straw Charms|4|H12-19-04
+FS2108-100 Pieces|FS2108-Christmas House Nail Chanms|7|H12-19-06
+FS3268-Gold-1PCS|FS3268-62MM Rectangular Mirror|9|H12-19-07
+FS2342-P49-10PCS||7|H12-20-01
+FS6395-Light Pink-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|9|H12-20-02
+FS6395-Royal Blue-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|7|H12-20-02
+FS5872-14|FS582-10 Pieces P9.5*14cm Phone Chain Card|7|H12-20-03
+FS6941-White-10PCS|FS6941-Silicone Straw Charms|4|H12-20-04
+FS1318-10 Pieces|FS1318- HK Gold Charms|7|H12-20-05
+FS1049-100 pieces|FS1049-12MM ChristmasTree|10|H12-20-06
+FS3268-Silver-1PCS|FS3268-62MM Rectangular Mirror|9|H12-20-07
+FS2342-P41-10PCS||2|H12-21-01
+FS6395-Blue Purple-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|5|H12-21-02
+FS6395-Pale Blue-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|9|H12-21-02
+FS6395-White and Colorful-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|1|H12-21-02
+FS6395-Colorful-1PCS|FS6395- Full Of Love Diamonds Beadable Pen|1|H12-21-02
+FS5872-3|FS582-10 Pieces P9.5*14cm Phone Chain Card|5|H12-21-03
+FS6006-5 Pieces|FS6006-About 26*82MM Heart Rhinestone Fringe|5|H12-21-04
+FS5854-10 Pieces|FS5854-25*70MM Long Rod Branch Patch|7|H12-21-05
+FS1794-1 Strand|FS1794-8MM Glass Beads|9|H12-21-06
+FS6466-20 Pieces|FS6466-2*20MM 3D Stitch Resin Beads|8|H12-21-07
+FS2342-P62-10PCS||3|H12-22-01
+FS6396-Champagne-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-22-02
+FS6396-White-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|6|H12-22-02
+FS5872-1|FS582-10 Pieces P9.5*14cm Phone Chain Card|9|H12-22-03
+FS1175-40 Pieces|FS1175-16MM Heart Crystal Diamonds|6|H12-22-04
+FS0986-2.5 Meters|FS0986-27MM Width Rhinestones Diamonds Pen Wraps|3|H12-22-05
+FS5896-10 Pieces|FS5896-Leather Cord Knot|10|H12-22-06
+FS5368-Gold-300 Pieces|FS5368- 10mm Lacquer Sensation Velvet, Soft Flower Charms Soft Flower Patches, Luminous Night Glow For DIY Project|8|H12-22-07
+FS2342-P40-10PCS||6|H12-23-01
+FS6396-Royal Blue-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|10|H12-23-02
+FS6396-Colorful-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|2|H12-23-02
+FS6396-Red Green-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|3|H12-23-02
+FS4871--Pink Ink-200PCS|Pen Point  6CM Length  Refills For Beadable Pens FS4869  FS4870 FS4871 FS4872 FS0300|10|H12-23-03
+FS1538-10 Pieces|FS1538-Snowman Silicone Flat Beads|5|H12-23-04
+FS2717-50 Pieces|FS2717-12MM Bead ring|7|H12-23-05
+FS5942-Purple-5Meters|FS5942-5CM Colorful Dot Polyester Rope|9|H12-23-06
+FS2517-Gold-100 Pieces|FS2517- 2.9*2.4MM Steel wire positioning beads|21|H12-23-07
+FS2342-P59-10PCS||1|H12-24-01
+FS6396-Crystal Blue-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|8|H12-24-02
+FS6396-Green-1PCS|FS6396- Full Of Love Diamonds Beadable Stylus Pens Lovingly Heart - Shaped Diamond - Strung Bead Stylus Pens|10|H12-24-02
+FS4870-Blue Ink-200PCS|FS0300-1.0mm Pen Point 6CM Length  Refills For Beadable Pens FS4869  FS4870 FS4871 FS4872|6|H12-24-03
+FS0843-10 Pieces|FS0843-33MM UV Mickey Based Bead|5|H12-24-04
+FS6870-10 pieces|FS6870-49*26MM Blue And Black Butterfly Metal Charms With Diamomds|8|H12-24-05
+FS5942-Grey-5Meters|FS5942-5CM Colorful Dot Polyester Rope|8|H12-24-06
+FS4169-5PCS|FS4169-Snoopy Nail Decals|27|H12-24-07
+FS5707-Rose Red-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|14|H2-01-01
+FS5062-300PCS|FS5062- 10mm Luminous Soft Flower Charms|4|H2-01-02
+FS6173-Green-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|16|H2-01-03
+FS6133-8-500PCS|FS6133- 7×10mm Waterdrop Petals|4|H2-01-04
+FS3565-Gold-100 PCS|FS3565-Colorful Chain|17|H2-01-05
+FS6311-100PCS|FS6311- 10×14mm Hk Set Down Charms Sitting Kitty Patches|5|H2-01-06
+FS3134-100PCS|FS3134- 13mm Pearl Patches|6|H2-01-07
+FS5707-Yellow-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|16|H2-02-01
+FS6351-Red-300PCS|FS6351- About 9×10mm Deep - Color Luminous Heart Soft Flower Charms For DIY project|6|H2-02-02
+FS0914-Black-500PCS|FS0914-8mm UV Glowing Roses For Making Fancy Beads Or Fancy Beadable Pens|2|H2-02-03
+FS6133-2-500PCS|FS6133- 7×10mm Waterdrop Petals|6|H2-02-04
+FS5969-200PCS|FS5969- 8*10mm Black Cat Charms|4|H2-02-05
+FS5587-200PCS|FS5587- 12mm Heart Kuku Charms Kuromi Stickers|8|H2-02-06
+FS6285-4-300PCS|FS6285- 10mm Hk Heart Charms Heart-Shaped Kitty Patches|4|H2-02-07
+FS5707-Pink-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|19|H2-03-01
+FS5548-Blue Green-300PCS|FS5548- 10mm Luminous Soft Flower Charms|2|H2-03-02
+FS6133-4-500PCS|FS6133- 7×10mm Waterdrop Petals|3|H2-03-04
+FS5352-200PCS|FS5352- Pochacco Bag Resin Patches|9|H2-03-05
+FS5586-200PCS|FS5586- 8*12mm Pc Dogs Charms Pacchy Dog Patches|5|H2-03-06
+FS6285-2-300PCS|FS6285- 10mm Hk Heart Charms Heart-Shaped Kitty Patches|5|H2-03-07
+FS5707-Blue-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|23|H2-04-01
+FS5495-Blue Pink-200PCS|FS5495- 11mm Soft Flower Charms Soft Flower Patches Luminous Night Glow|6|H2-04-02
+FS3660-500PCS|FS3660- 8mm Silver Black Rose Flower Charms Silver Black Rose Flower|0|H2-04-03
+FS6133-9-500PCS|FS6133- 7×10mm Waterdrop Petals|4|H2-04-04
+FS5353-200PCS|FS5353- HK Bags Resin Patches|4|H2-04-05
+FS5036-Pink-300PCS|FS5036- Sanrio Skateboard Series Patches|6|H2-04-06
+FS6285-3-300PCS|FS6285- 10mm Hk Heart Charms Heart-Shaped Kitty Patches|6|H2-04-07
+FS5707-Purple-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|23|H2-05-01
+FS1810-500PCS|FS1810- 8MM Glowing UV Colorful White Bottom mini Rose Flower Nails Charms|7|H2-05-02
+FS3565-Silver-100 PCS|FS3565-Colorful Chain|17|H2-05-03
+FS6133-5-500PCS|FS6133- 7×10mm Waterdrop Petals|5|H2-05-04
+FS5934-200PCS|FS5934- 13*11Mm Bows Charms Bowknot Patches|5|H2-05-05
+FS5490-50PCS|FS5490- Strawberry Bear Resin Patches|6|H2-05-06
+FS6285-1-300PCS|FS6285- 10mm Hk Heart Charms Heart-Shaped Kitty Patches|5|H2-05-07
+FS5707-Red-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|19|H2-06-01
+FS5770-Pink-500PCS|FS5770-8mm UV Luminous Rose Flower Nail Charms For Making Fancy Beads Or Fancy Beadable Pens For DIY Project|4|H2-06-02
+FS3750-500PCS|FS3750- 8mm Flocked Rose Flower Charms Flocked Rose|1|H2-06-03
+FS6133-10-500PCS|FS6133- 7×10mm Waterdrop Petals|4|H2-06-04
+FS5995-1-500PCS|FS5995- 7.5mm Sugar Heart Charms|2|H2-06-05
+FS6023-200PCS|FS6023- Mixed Style Black And White HK Charms Mixed Style Black And White Kitty Series Patches|5|H2-06-06
+FS2936-500PCS|FS2936- 8mm Glowing Cat Paws Nails Charms For DIY Project|5|H2-06-07
+FS5707-Orange-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|21|H2-07-01
+FS6162-Pink-200PCS|FS6162- 12mm Luminous Hibiscus Flower Charms Glow-In-The-Dark Hibiscus Flower Patches For DIY project|6|H2-07-02
+FS6517-300PCS|FS6517-9mm Transparent Printing Sakura Resin Nail Charms Nail Charms Floral Nail Art Charms Luminous Flower Charms for Nails Design Floral Charm Resin Flowers Manicure Decorations Blossom Petals For DIY Project|5|H2-07-03
+FS6133-3-500PCS|FS6133- 7×10mm Waterdrop Petals|5|H2-07-04
+FS5995-2-500PCS|FS5995- 7.5mm Sugar Heart Charms|2|H2-07-05
+FS6515-1-300PCS|FS6515- 9*9Mm UV Bowknot Nail Art Stickers UV Bowknot Nail Art Stickers|5|H2-07-06
+FS1417-20PCS|FS1417-10PCS 34MM Flower bows|20|H2-07-07
+FS5707-White-300PCS|FS5707- 6.5mm 5-Petal Flower Charms With Diamonds|14|H2-08-01
+FS6162-White-200PCS|FS6162- 12mm Luminous Hibiscus Flower Charms Glow-In-The-Dark Hibiscus Flower Patches For DIY project|5|H2-08-02
+FS5227-100PCS|FS5227- 15mm Five-petal Resin Stickers With Diamonds|19|H2-08-03
+FS3779-Gold-10PCS|FS3779- 47mm Two-Layer UV Silver Crystal Flower Charms Two-Layer Crystal Flowers For DIY Projects|7|H2-08-04
+FS5995-3-500PCS|FS5995- 7.5mm Sugar Heart Charms|2|H2-08-05
+FS6515-2-300PCS|FS6515- 9*9Mm UV Bowknot Nail Art Stickers UV Bowknot Nail Art Stickers|7|H2-08-06
+FS6384-20PCS|FS6384- 35×26Mm Luminous Grape Charms|10|H2-08-07
+FS6534-Red-300PCS|FS6534-9mm Luminous Soft Flower Charms Luminous Camellias Roses Nail Art Charms Soft Carved Leaf Flower Charms for Nails Design For DIY Project|4|H2-09-01
+FS5566-Gray-300PCS|FS5566- 8mm Luminous Rose Flower Charms Pearl - Glow Luminous Rose Flowers|6|H2-09-02
+FS5764-500PCS|FS5764- 10mm Leopard Print 5 - Petal Flower Charms Leopard Print Five - Petal Small Flower Patches|6|H2-09-03
+FS6927-5PCS|FS6927-45MM Glazed Double-Layer Epiphyllum For Decoration DIY Craft|10|H2-09-04
+FS4429-200PCS|FS4429- Cinnamoroll Patches, Charms Patches|6|H2-09-05
+FS6514-500PCS|FS6514-10MM UV Bow Nail Charms|6|H2-09-06
+FS6386-10PCS|FS6386- 56×49mm Luminous Peach Blossom Branch Charms|9|H2-09-07
+FS6534-Purple-300PCS|FS6534-9mm Luminous Soft Flower Charms Luminous Camellias Roses Nail Art Charms Soft Carved Leaf Flower Charms for Nails Design For DIY Project|3|H2-10-01
+FS4660-Blue-300PCS|FS4660- 10mm Luminous Glow-in-the-dark Flower|5|H2-10-02
+FS1480-Mixed-200PCS|FS1480-8MM Size Mixed Color Flower Nail Resin Charms For Making Fancy Pen Or Fancy Bead|12|H2-10-03
+FS6928-5PCS|FS6928-36MM Glazed Double-Layer Peony For Decoration DIY Craft|4|H2-10-04
+FS6172-500PCS|FS6172- 6×8mm Colorful Butterfly Charms Colorful Small Butterfly Patches|9|H2-10-05
+FS6005-300PCS|FS6005- 9mm Uv Bows Charms Small Bow Patches|8|H2-10-06
+FS5777-20PCS|FS5777- Maple Leaf Patches|8|H2-10-07
+FS6533-Purple-300 Pieces|FS6533-9mm Luminous Soft Flower Charms Luminous Camellias Roses Nail Art Charms Soft Carved Leaf Flower Charms for Nails Design For DIY Project|6|H2-11-01
+FS4660-Purple-300PCS|FS4660- 10mm Luminous Glow-in-the-dark Flower|5|H2-11-02
+FS6754-300PCS|FS6754-9MM Transparent Printing Resin Charms For Nail Charms|12|H2-11-03
+FS1002-10PCS|FS1002-27MM Acrylic Muti-Petal Flower For Jewelry Making(Not For Beadable Pens)|2|H2-11-04
+FS6508-200PCS|FS6508- About 6×7mm Ice Transparent Vegetable Series Nail Stickers|6|H2-11-05
+FS3819-200PCS|FS3819- Butterfly Nail Art Stickers For DIY Project|21|H2-11-06
+FS0313-Black-10PCS|FS0313-45MM Black Silver Chrysanthemum Charms Accessories For Making Fancy Beads|6|H2-11-07
+FS6533-Brown-300 Pieces|FS6533-9mm Luminous Soft Flower Charms Luminous Camellias Roses Nail Art Charms Soft Carved Leaf Flower Charms for Nails Design For DIY Project|2|H2-12-01
+FS6173-White-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|3|H2-12-02
+FS6943-100PCS|FS6943-Five-Petal Flower Nail Art Decals|13|H2-12-03
+FS1004-White-10PCS|FS1004- 47MM Mixed Color Handmade  Flower For Making Fancy Beads|2|H2-12-04
+FS6509-200PCS|FS6509- Approximately 12Mm SpongeBob Series Nail Stickers|7|H2-12-05
+FS6689-200PCS|FS6689-3D Resin Elegant Butterfly Nail Art Rhinestones Spring Summer Colorful Butterflies Nail Gems and Charms Kawaii Nail Diamonds Nails Jewels for Women Acrylic Nail Supplie|10|H2-12-06
+FS0313-Silver-10PCS|FS0313-45MM Black Silver Chrysanthemum Charms Accessories For Making Fancy Beads|9|H2-12-07
+FS6535-300PCS|FS6535-9MM Luminous Soft Flower Charms For Nail Charms|3|H2-13-01
+FS6173-Pink-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|9|H2-13-02
+FS1006-Mixed-200 PCS|FS1006- 8MM  White Flower Nail Charms For Making Fancy Beads Or Fancy Pen|6|H2-13-03
+FS6382-10PCS|FS6382- 50×47mm Luminous Wedding Dress Charms|4|H2-13-04
+FS6476-100PCS|FS6476- Approximately 14×12mm Donkey Nail Charms|3|H2-13-05
+FS3345-1-20PCS|FS3345- 38*24mm Two - Color Glowing Butterfly Charms Double - Color Glowing Butterflies For DIY Projects|7|H2-13-07
+FS6554-Blue-300PCS|FS6554- 10mm Luminous Soft Flower Charms Ye Guang Ruan Hua Tie Pian For DIY Project|6|H2-14-01
+FS6173-Purple-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|4|H2-14-02
+FS6516-300PCS|FS6516- 9.2nm Transparent Printing Flower|6|H2-14-03
+FS4996-200PCS|FS4996- 6mm Lollipop Resin Nail Stickers|9|H2-14-04
+FS5970-100PCS|FS5970- 12*15mm Cute Dog Charms|5|H2-14-05
+FS5060-500PCS|FS5060- Soft Butterfly Charms Soft Bowknot Luminous Glow-in-the-Dark For DIY project|6|H2-14-06
+FS3345-2-20PCS|FS3345- 38*24mm Two - Color Glowing Butterfly Charms Double - Color Glowing Butterflies For DIY Projects|9|H2-14-07
+FS6554-Black Red-300PCS|FS6554- 10mm Luminous Soft Flower Charms Ye Guang Ruan Hua Tie Pian For DIY Project|6|H2-15-01
+FS6173-White With Sparkles-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|6|H2-15-02
+FS6133-7-500PCS|FS6133- 7×10mm Waterdrop Petals|4|H2-15-03
+FS6472-300PCS|FS6472- Approximately 14×6mm Luminous Sunglasses Nail  Charms|6|H2-15-04
+FS1041-100PCS|FS1041- 12MM White Snownman Nail Charms For Making Fancy Bead Or Fancy Pen|18|H2-15-05
+FS5525-300PCS|FS5525- 9Mm Two-Layer Three-Petal Diamond Drill Flower Nail Stickers|8|H2-15-06
+FS1015-Pink-20PCS|FS1015- 31MM*41MM Clear AB Butterfly Acrylic Charms For Making Car Hangers Or Fancy Beads|10|H2-15-07
+FS5368-Silver-300PCS|FS5368- 10mm Lacquer Sensation Velvet, Soft Flower Charms Soft Flower Patches, Luminous Night Glow For DIY Project|7|H2-16-01
+FS6173-Blue-500PCS|FS6173- 8mm Rose Charms Glitter Translucent Rose Patches|8|H2-16-02
+FS6133-1-500PCS|FS6133- 7×10mm Waterdrop Petals|4|H2-16-03
+FS5986-20PCS|FS5986- Sanrio Acrylic Sheets|5|H2-16-04
+FS6478-200PCS|FS6478- About 8mm Capybara Nail Charms|5|H2-16-05
+FS6016-Pink-100PCS|FS6016- 14*15.5mm Type A Center-Hole Butterfly|6|H2-16-06
+FS6247-20PCS|FS6247- 32mm Soft Butterfly Patch|5|H2-16-07
+FS6774-200PCS|FS6774-8MM Double-Hole Acrylic Letter Beads for  Jewelry DIY Crafts Bracelets|11|H3-01-01
+FS1567-Black-10PCS|FS1567- 36mm Soild Color Glowing Rose Flower Resin Charms For Making Fancy Beads|5|H3-01-02
+FS5880-10PCS|FS5880- Alien Double-Sided Printed Handbag With Acrylic Beads|8|H3-01-03
+FS6379-10PCS|FS6379- 31×18Mm Flocked Super Mario Beads Flocked Super Mario Beads|4|H3-01-04
+FS5943-1PCS|FS5943- Pretty Girl Sailor Moon Display Stand|8|H3-01-05
+FS1600-10PCS|FS1600-46*40MM Medium Size Clear Moon Acrylic Based Beads Fit For Beadable Pens|4|H3-01-06
+FS3780-500g|FS3780-6MM Semi-Circular Acrylic Patch For Decoration|15|H3-01-07
+FS6785-200PCS|FS6785-6*6MM Square Transparent Silver English Letter Acrylic Beads for DIY Jewellery Making (Necklaces and Bracelets)|12|H3-02-01
+FS4355-5PCS|FS4355- 44Mm Black Rose Flower Patch Rose Rose|40|H3-02-02
+FS4291-5PCS|FS4291- Uv Girl Beads Fit For Pen Passing Through Pen|7|H3-02-03
+FS4832-20PCS|FS4832- Sanrio Hollowed-Out Resin Charms|5|H3-02-04
+FS2897-20MM|FS2897-20mm  Heart Silicone Beads|24|H3-02-05
+FS5213-500PCS|FS5213-5mm Clear Round Based Beads Fit For Pens|5|H3-02-06
+FS3639-Purple-5000PCS|FS3639-4mm AB Half Pearl Looking Half Acrylic Pearl Patch For Making Fancy Beads Or Fancy Pen For DIY Project|1|H3-02-07
+FS6762-300PCS|FS6762-4*7MM White Background Colorful Acrylic Letter Beads For Making Bracelets Jewelry Making|24|H3-03-01
+FS5781-20PCS|FS5781- 47*24Mm Fire Flower Charms Flame Flower Patches|13|H3-03-02
+FS5835-20PCS|FS5835- McDonald's Acrylic Beads|5|H3-03-03
+FS6720-10PCS|FS6720-22×19mm HK 3D UV Coating Resin Beads|5|H3-03-04
+FS1129-20PCS|FS1129-15MM Christmas Silicone Beads for Pens, Necklaces and Bracelets|13|H3-03-05
+FS6833-20PCS|FS6833-Random Mixed Harry Potter Acrylic Beads For DIY Jewellery Making (Necklaces and Bracelets)|5|H3-03-06
+FS6485-Green-500PCS|FS6485-4MM  Acrylic Flower Bead Caps Transparent Flower Beads Bulk Colorful Bell Tulip Flowers Lily Floral Spacer Loose Bead End Caps for Jewelry Making Earrings Bracelets Women Adult DIY Crafts|9|H3-03-07
+FS6766-300PCS|FS6766-6*6MM Square White Background Colorful Letter Acrylic Beads for Jewellery Making Necklaces Bracelets Crafts|6|H3-04-01
+FS6571-20PCS|FS6571- 22*30Mm Luminous Bouquet Charms|20|H3-04-02
+FS5780-10PCS|FS5780- Sitting Posture Dragon Beads|5|H3-04-03
+FS6730-20PCS|FS6730-Toys Resin Beads|5|H3-04-04
+FS2912-20PCS|FS2912-15MM Snowman Silicone Beads for DIY Keyrings Crafts Jewelry Making Keychains, Making Mixed Silicone Focal Beads for Pens, Necklaces and Bracelets|11|H3-04-05
+FS6219-10PCS|FS6219- 25×28Mm Rectangular Based Bead With Hanging Hole|8|H3-04-06
+FS5816-200PCS|FS5816- 17*20mm Big Pearlescent Perforated Petals|5|H3-04-07
+FS6784-300PCS|FS6784-5.5*5.5MM Square Black Background Gold English Letter Acrylic Beads DIY Jewelry Bracelet Necklace Keychain Making|9|H3-05-01
+FS4798-Purple-10PCS|FS4798- 45mmx50mm Flower, Butterfly, Luminous Charms Patches|5|H3-05-02
+FS6566-8PCS|FS6566- About 29*22mm UV HK Kitty Pikachu Beads  Beads Fit For Pen|9|H3-05-03
+FS6564-10PCS|FS6564- Approximately 23*24mm UV Hello Kitty Cup Beads  Fit For Pen Pen Passing|1|H3-05-04
+FS1128-20PCS|FS1128-15MM Christmas Elk Silicone Beads for Pens, Necklaces and Bracelets|8|H3-05-05
+FS6220-20PCS|FS6220- 29×24mm Rhombus Based Beads|8|H3-05-06
+FS0397-20PCS|FS0397- 11mm Double-Hole Semi-Circular Bottom Beads|8|H3-05-07
+FS6780-300PCS|FS6780-4*7MM Solid Color Mixed Color Base Black Letter Acrylic Letter Beads for DIY Bracelet Necklaces Accessory|7|H3-06-01
+FS5755-50g|FS5755- Black Sunglass Teethers Acrylic Sheets (Approximately 17 Pcs. The Quantity Varies Due To Size Differences, But It Will Weigh 50 G)|7|H3-06-02
+FS6448-10PCS|FS6448- ABOUT 29MM UV STITCH BEADS UV STITCH BEADS FIT FOR PEN|8|H3-06-03
+FS6499-10PCS|FS6499- 20mm Pepsi Cola Round Acrylic Beads|6|H3-06-04
+FS1130-20PCS|FS1130-15MM Snowflake Silicone Beads for  DIY Keyrings Crafts Jewelry Making|9|H3-06-05
+FS2406-5PCS|FS2406- 5PCS 45MM Leopard print dog pendant|9|H3-06-06
+FS1047-200PCS|FS1047- 10MM Mixed Color Clear Glitter Lotus Resin Accessories|5|H3-06-07
+FS6783-50PCS|FS6783-9MM Square Transparent Color Acrylic Letter Beads With White Writing For Jewellery, Necklaces, Keyrings|11|H3-07-01
+FS5757-5PCS|FS5757- Black Sunglasses Pacifier 8cm Acrylic (Approximately 50g)|6|H3-07-02
+FS5793-10PCS|FS5793- 28mm Uv Rainbows Bear Beads Rainbow Bear Beads Fit For Pen|7|H3-07-03
+FS6748-10PCS|FS6748-20mm K-Pop Printed Round Plate Acrylic Beads|2|H3-07-04
+FS5807-20PCS|FS5807-Printed Acrylic Charms  Double Sided Clear Snoopy Patterns Dog Charms for Jewelry Making DIY|5|H3-07-05
+FS6513-10PCS|FS6513-26×30mm Book Page Based Beads|10|H3-07-06
+FS6458-400PCS|FS6458- Approximately 5×10mm Imitation Pearl Leaf Hanging Hole|12|H3-07-07
+FS6772-300PCS|FS6772-4*7MM Black Background Colorful Acrylic Letter Beads for  Jewellery Making Necklaces Bracelets Crafts|9|H3-08-01
+FS6437-10PCS|FS6437- Approximately 31×25mm Halloween Acrylic Book Piece|8|H3-08-02
+FS6563-8PCS|FS6563- Approximately 23*28mm UV Mickey Minnie Beads  Fit For Pen Through Pen|6|H3-08-03
+FS5837-20PCS|FS5837- HK Toast Acrylic Beads|7|H3-08-04
+FS6417-10PCS|FS6417- 50×34mm Sanrio Hanging Hole Chocolate Chips|7|H3-08-05
+FS1079-20PCS|FS1079- 20*37mm White Solid Color Based Beads Fit For Beadable Pens|4|H3-08-06
+FS6471-200PCS|FS6471- Approximately 10×11mm Pearl Looking Butterfly With Hole Acrylic Beads|7|H3-08-07
+FS6775-300PCS|FS6775-4*7MM White Background Colorful Love Heart Printed Beads  for Jewelry DIY Crafts Bracelets|10|H3-09-01
+FS5844-10PCS|FS5844- Star - Man DIY Page Acrylic|7|H3-09-02
+FS5785-7PCS|FS5785- Mario Resin Beads|11|H3-09-03
+FS6025-20PCS|FS6025- Starbucks Resin Beads|3|H3-09-04
+FS5806-20PCS|FS5806- 5cm Rainbow Bear Acrylic Patch Without Holes|6|H3-09-05
+FS6087-20PCS|FS6087- 25*29mm Phone Based Beads, Phone Beads Base Beads With Hanging Holes|23|H3-09-06
+FS2371-Silver-10PCS|FS2371-Cute Metalic UV Shiny Balloon Dog Acrylic Charms|8|H3-09-07
+FS6781-300PCS|FS6781-4*7MM Smiley Print Acrylic Beads for  Bracelet Choker Jewelry Making DIY Crafts|8|H3-10-01
+FS5808-20PCS|FS5808- 5cm Shi Nubia Keli Patch With Holes|6|H3-10-02
+FS6449-20PCS|FS6449- ABOUT 16×21MM UV Doraemon BEADS UV Doraemon BEADS FIT FOR PEN|5|H3-10-03
+FS4266-20PCS|FS4266- Hk Love Acrylic Beads|5|H3-10-04
+FS6588-10PCS|FS6588- Approximately 52*37 Sanrio Hot Air Balloon Hanging Hole Piece Sanrio Hot Air Balloon Hanging Hole Piece|5|H3-10-05
+FS0384-10PCS|FS0384- 21Mm Round Plate Beads White Thick Round Plates|15|H3-10-06
+FS5827-10PCS|FS5827- Paint - textured Balloon Dog Pendant|6|H3-10-07
+FS6768-300pcs|FS6768-6*6MM Square White Background Gold Letter English Alphabet Acrylic Beads for  Jewelry DIY Crafts Bracelets|5|H3-11-01
+FS4128-50PCS|FS4128- 2cm Mikko Charms Non - Holed Acrylic Sheets|5|H3-11-02
+FS6120-10PCS|FS6120- 3.2cm 3D Dragon Through-Hole Beads|5|H3-11-03
+FS6836-20PCS|FS6836-16mm Random Mixed Jelly Color Printed Acrylic Beads for DIY Jewellery Making Bracelets and Keyrings|8|H3-11-04
+FS6738-10PCS|FS6738-Sailor Moon Mixed Print Acrylic Beads For Jewelry Necklace Bracelet Making,Beadable Pens|6|H3-11-05
+FS0834-10PCS|FS0834-42MM Solid Elliptical Whiteboard Fit For Beadspen  Beads|5|H3-11-06
+FS2392-20PCS|FS2392- 10PCS 48MM High heel pendant|5|H3-11-07
+FS6773-300PCS|FS6773-8MM Double-hole White Background Gold Letter English  Alphabet Acrylic Beads for for Bracelets, Necklaces, Jewellery, DIY|7|H3-12-01
+FS6502-10PCS|FS6502-K-POP Witch Hunting Group Pendant|8|H3-12-02
+FS6732-20PCS|FS6732-Pokeman UV Resin Beads|3|H3-12-03
+FS6835-20PCS|FS6835-16mm Clear Mixed Color Printed Acrylic Beads Solid White Mixed Color UV Coating Printed Acrylic Beads For Making Pens Keychain&nbsp|10|H3-12-04
+FS4822-50PCS|FS4822-18mm Glitter Acrylic Patch for DIY Jewelry Making Necklace Bracelet Earrings Keychain Making|7|H3-12-05
+FS0848-20PCS|FS0848- 34mm Round Frame Beads Hollow Circular Beads|33|H3-12-06
+FS4490-50PCS|FS4490- 13mm Bell|4|H3-12-07
+FS6778-300PCS|FS6778-6*6MM Square Mixed Color Electroplated Gold English Letter Acrylic Beads for  Jewelry DIY Crafts Bracelets|10|H3-13-01
+FS6729-20PCS|FS6729-Marine Animal Series Resin Beads|6|H3-13-03
+FS6834-20PCS|FS6834-Solid White Mixed Color UV Coating Printed Acrylic Beads For Making Pens Keychain&nbsp|5|H3-13-04
+FS2242-20PCS|FS2242- 20PCS 16MM Heart bottom diamond|17|H3-13-05
+FS6033-White10PCS|FS6033- 16mm Cube Based Beads Square Bottom Beads|17|H3-13-06
+FS3121-20PCS|FS3121- 20 Pieces 9mm+10mm Silver Small+big Lily of the valley metal Charms|7|H3-13-07
+FS6779-300PCS|FS6779-6*6MM Square Transparent White English Letter Acrylic Beads for Bracelet Choker Jewelry Making DIY Crafts|8|H3-14-01
+FS6344-10PCS|FS6344- 25*31mm Hk Heart Plate Beads Love Kitty Round Plate Beads|4|H3-14-02
+FS6731-20PCS|FS6731-Marine Animal Series Resin Beads|9|H3-14-03
+FS6896-20PCS|FS6896-16mm Random Mixed Glitter Luminous Leopard Printed Acrylic Beads For Making Keychain Jewelry Making Beadable Pens Making|5|H3-14-04
+FS2864-100PCS|FS2864- 8mm Pink Pointed-Bottom Mocha Round Diamond|7|H3-14-05
+FS6033-Cyan-10PCS|FS6033- 16mm Cube Based Beads Square Bottom Beads|9|H3-14-06
+FS5850-200PCS|FS5850- 13mm Pearlescent Wavy Spacers Pearlescent Wavy Spacers|23|H3-14-07
+FS6782-300PCS|FS6782-4*7MM Transparent Colored Gold Letter Acrylic Beads for DIY Jewelry Bracelet Necklace Keychain Making|11|H3-15-01
+FS6747-10PCS|FS6747-Hero Character Printed Mixed Acrylic Beads|4|H3-15-02
+FS6464-10PCS|FS6464- Approximately 30×20mm Penguin Resin Beads|3|H3-15-03
+FS3874-20PCS|FS3874- 16mm Transparent Mikoo Printed Beads|6|H3-15-04
+FS0975-1000PCS|FS0975- 4*4Mm Mini Square Diamond Stickers|13|H3-15-05
+FS6182-20PCS|FS6182- 30×27mm Apple Based Beads|4|H3-15-06
+FS6577-Silver-50PCS|FS6577- 13mm  Gold-Plated Or Silver-Plated Wavy Spacer Beads|4|H3-15-07
+FS6545-200PCS|FS6545- 4*7 Aperture 12mm 4*7 Font Mixed Color Luminous Acrylic Letter Beads|18|H3-16-01
+FS1525-10PCS|FS1525- Hk Bag Beads Bags Beads|8|H3-16-02
+FS1513-5PCS|FS1513-5 Pieces/Set Winne Bear Resin Pen Topper|5|H3-16-03
+FS6497-20PCS|FS6497- 16mm Random Mixed Jelly Color Twin Star Printed Acrylic Beads|6|H3-16-04
+FS3972-200PCS|FS3972- 4.5mm Red Crystal Diamonds|13|H3-16-05
+FS2497-30PCS|FS2497-17×23mm Solid Color White Cube Beads Fit For Beadable Pens|24|H3-16-06
+FS0844-16PCS|FS0844- 15mm Cube Beads White Square Base Beads|7|H3-16-07
+FS6776-300PCS|FS6776-6*6MM Square Black Background Gold English Letter Acrylic Beads for Jewellery Making Necklaces Bracelets Crafts|7|H3-17-01
+FS5279-20PCS|FS5279- 30Mm Starb Cups Beads, Fit For Pen|8|H3-17-02
+FS6260-8PCS|FS6260- Star Man Resin Charms, The Resin Ornaments Of Star People|6|H3-17-03
+FS4259-20PCS|FS4259-Solid White Random Mixed mikoo Printed Acrylic Beads Fit For Beadable Pens|10|H3-17-04
+FS5308-200PCS|FS5308- 8mm AB-Coated Acrylic Beads (Not Passing Through Pens)|5|H3-17-05
+FS0805-10 Pieces|FS0805-Disco Base Beads|8|H3-17-06
+FS2200-White-500PCS|FS2200- Round pearl circle|4|H3-17-07
+FS6764-300PCS|FS6764-6*6MM Square Black Background Colorful English Letter Acrylic Beads 6*6MM Square Silver Based Colorful English Letter Acrylic Beads for  DIY Jewellery Making, Bracelets Necklaces|10|H3-18-01
+FS6830-20PCS|FS6830-23.7×24.6mm Random Mixed Color Handbag Acrylic Beads for DIY Jewellery Making (Necklaces and Bracelets)|7|H3-18-02
+FS4369-10PCS|FS4369- Glow-in-the-dark Vase Ornaments|5|H3-18-03
+FS3475-20PCS|FS3475- 16mm McDonald's Beads|7|H3-18-04
+FS5040-1000PCS|FS5040- 4mm Ab White Pearl Beads White Pearl Beads No Fit Pen|12|H3-18-05
+FS3650-20PCS|FS3650-33mm Flower Bottom Pearl|5|H3-18-06
+FS2161-500PCS|FS2161-12×12mm Pearl Looking Acrylic Cube For Making Fancy Beads Or Fancy Pen (Also Can be Spacer) For DIY Project|7|H3-18-07
+FS6771-300PCS|FS6771-4*7MM White Background Colorful Acrylic Number Beads for DIY Jewellery Making (Necklaces and Bracelets)|12|H3-19-01
+FS6267-10PCS|FS6267- Sanrio Bag Resin Beads|5|H3-19-02
+FS6533-Red-300PCS|FS6533-9mm Luminous Soft Flower Charms Luminous Camellias Roses Nail Art Charms Soft Carved Leaf Flower Charms for Nails Design For DIY Project|5|H3-19-03
+FS6697-20PCS|FS6697-16mm Cracked Daisy Flower Printed Acrylic Beads|6|H3-19-04
+FS2343-50g|FS2343-50g 5mm No Hole Pearl charms|15|H3-19-05
+FS4944-20PCS|FS4944-14×14mm UV Cube Acrylic Beads|4|H3-19-06
+FS6085-Orange-5PCS|FS6085- Love Double Pendants|6|H3-19-07
+FS6777-300PCS|FS6777-6*6MM Square Silver Based Colorful English Letter Acrylic Beads for  DIY Jewellery Making, Bracelets Necklaces|7|H3-20-01
+FS6565-5PCS|FS6565-  UV Sanrio Handbag Beads Fit For Pen Fit For Pen|8|H3-20-02
+FS6112-6PCS|FS6112- Mermaid Ornament|7|H3-20-03
+FS0575-20PCS|FS0575- 16mm UV Printed Beads|6|H3-20-04
+FS5672-White-500PCS|FS5672- 5mm AB Color Beads, Plated AB Colorful Beads, Fit For Pen|7|H3-20-05
+FS0873-20PCS|FS0873-22MM Mixed Color Bag Based Bead Fit For Beadspen  Beads|2|H3-20-06
+FS5181-50PCS|FS5181- 14*15mm Lotus Pod Beads Charms Lotus Pendant Luminous|5|H3-20-07
+FS5795-10PCS|FS5795- 36mm Luminous Double-Color Flower Patches|12|H3-21-01
+FS4225-10PCS|FS4225- Hamburg Disney Resin Beads|8|H3-21-02
+FS5560-5PCS|FS5560- Stitch Flocked Resin Beads (Through Holes)|8|H3-21-03
+FS4399-20PCS|FS4399- 16mm Jelly - Colored Betty Acrylic Beads|4|H3-21-04
+FS5892-300PCS|FS5892- 8mm Pearl Beads With Large Holes Fit For Pen|1|H3-21-05
+FS6156-20PCS|FS6156- 24×30mm Ellipse Bows Based Beads|6|H3-21-06
+FS2383-Beige-50PCS|FS2383-16MM UV Solid Color Acrylic Beads For Making Car Hangers|8|H3-21-07
+FS6381-10PCS|FS6381- 36Mm Luminous Flocked Rose Charms|5|H3-22-01
+FS6510-Mixed-300PCS|FS6510- 10Mm Stitch Nail Art Stickers|5|H3-22-02
+FS5592-9PCS|FS5592- Greeting Maolili Flocked Ornament|3|H3-22-03
+FS5594-9PCS|FS5594- Pocket Bunny Sweet Cub Flocked Ornament|6|H3-22-04
+FS1754-200PCS|FS1754 - 200PCS 10mm Pearl Looking acrylic beads|5|H3-22-05
+FS1200-20PCS|FS1200- 32MM Solid White Based beads Fit For Beadable Pens|9|H3-22-06
+FS2383-Dark Pink-50PCS|FS2383-16MM UV Solid Color Acrylic Beads For Making Car Hangers|7|H3-22-07
+FS4425-Red-10PCS|FS4425- 36mm Luminous Big Flower Luminous Flower|5|H3-23-01
+FS6510-Pink-300PCS|FS6510- 10Mm Stitch Nail Art Stickers|5|H3-23-02
+FS5263-10PCS|FS5263- Hk Swimming Ring Charms Swimming Ring Decorations|5|H3-23-03
+FS6024-20PCS|FS6024- Alien Silicone Beads|4|H3-23-04
+FS6853-50PCS|FS6853-12MM Acrylic Imitation pearl for  DIY Jewellery Making Bracelets and Keyrings|5|H3-23-05
+FS0382-20PCS|FS0382- White Cap Based Acrylic Beads (Better For Hanpainted)Fit For Beadspen Beads|12|H3-23-06
+FS2383-Purple-50PCS|FS2383-16MM UV Solid Color Acrylic Beads For Making Car Hangers|5|H3-23-07
+FS6385-25PCS|FS6385- 23mm Luminous Hibiscus Flower Charms|10|H3-24-01
+FS6510-Blue-300PCS|FS6510- 10Mm Stitch Nail Art Stickers|5|H3-24-02
+FS6195-8PCS|FS6195-Flocked Stitch Beads For DIY Craft|5|H3-24-03
+FS5287-10PCS|FS5287- 10 PCS/Set Swimming Ring Sister Ornaments|6|H3-24-04
+FS6485-Purple-500PCS|FS6485-4MM  Acrylic Flower Bead Caps Transparent Flower Beads Bulk Colorful Bell Tulip Flowers Lily Floral Spacer Loose Bead End Caps for Jewelry Making Earrings Bracelets Women Adult DIY Crafts|3|H3-24-05
+FS6485-Pink-500PCS|FS6485-4MM  Acrylic Flower Bead Caps Transparent Flower Beads Bulk Colorful Bell Tulip Flowers Lily Floral Spacer Loose Bead End Caps for Jewelry Making Earrings Bracelets Women Adult DIY Crafts|4|H3-24-06
+FS3799-50PCS|FS3799- 16mm Pearl Beads Pearl Waxberry Ball Beads|9|H3-24-07
+FS6892-20PCS|FS6892-16mm Random Mixed Dark Color Flocked Acrylic Beads For Beadable Pens Keychain Jewelry Making|7|H4-01-01
+FS3547-20PCS|FS3547- 16MM UV Round Mixed Color With Dried Flower Gold Foil  Inside Resin Beads Fit For Beadable Pens|5|H4-01-02
+FS3536-20PCS|FS3536- 20mm Cat's Eye Resin Beads|4|H4-01-03
+FS2307-Purple-15PCS|FS2307-Clear Color Lotus Flower (1 Set=24MM Size  +34MM Size +38MM Size )|7|H4-01-04
+FS6160-1000PCS|FS6160- 4mm Pink Crystal Glass Beads|10|H4-01-05
+FS6698-20PCS|FS6698-16mm Demon Slayer Printed Acrylic Beads|6|H4-01-06
+FS1013-Purple1-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|6|H4-01-07
+FS6889-100PCS|FS6889-8mm Random Dark Color Mixed Flocked Acrylic Beads Fit For Beadable Pens|6|H4-02-01
+FS0553-20PCS|FS0553-16MM Mixed Color Foil Resin Beads Fit For Beadable Pens|6|H4-02-02
+FS1331-20PCS|FS1331-16mm Frosted Cat Eye Resin Beads Fit For Beadable Pens|20|H4-02-03
+FS2307-Pink-15PCS|FS2307-Clear Color Lotus Flower (1 Set=24MM Size  +34MM Size +38MM Size )|6|H4-02-04
+FS6054-1000PCS|FS6054- Approximately 4mm Crystal Glass Beads AB|6|H4-02-05
+FS1290-20PCS|FS1290- 16mm Sanrio Beads|5|H4-02-06
+FS1013-Purple2-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|6|H4-02-07
+FS6891-50PCS|FS6891-12mm Random Mixed Dark Color Flocked Acrylic Beads Fit For Beadable Pens|8|H4-03-01
+FS1198- Mixed-10PCS|FS1198- 20MM Round Resin Beads Fit For Beadable Pens|5|H4-03-02
+FS5231-20PCS|FS5231- 16mm Two-Color Cat Eyes Beads Iridescent Two-Color Cat Eye Beads|3|H4-03-03
+FS2307-Blue-15PCS|FS2307-Clear Color Lotus Flower (1 Set=24MM Size  +34MM Size +38MM Size )|8|H4-03-04
+FS3843-100g|FS3843- Blue-Style Mixed Glass Beads|7|H4-03-05
+FS4370-20PCS|FS4370- 16mm Starbucks Beads|8|H4-03-06
+FS1013-Purple3-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|7|H4-03-07
+FS6890-100PCS|FS6890-10mm Random Dark Color Mixed Flocked Acrylic Beads Fit For Beadable Pens|10|H4-04-01
+FS0361-20PCS|FS0361- 16MM Round Mixed Color UV Shiny Cat Eyes Resin Beads Fit For Beadable Pens|10|H4-04-02
+FS2307-Mixed-15PCS|FS2307-Clear Color Lotus Flower (1 Set=24MM Size  +34MM Size +38MM Size )|12|H4-04-04
+FS2524-Mixed-400PCS|FS2524- 6mm Christmas Red AB Crystal Glass Beads|4|H4-04-05
+FS6503-20PCS|FS6503- Thank You Sugar Acrylic Beads （サンキューシュガーアクリルビーズ）|10|H4-04-06
+FS1013-Blue1-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|4|H4-04-07
+FS6893-20PCS|FS6893-About 33×23mm Random Mixed Dark Color Bear Flocked Acrylic Beads for DIY Jewelry Making Bracelet Necklace Crafts|3|H4-05-01
+FS4801-20PCS|FS4801- 16mm UV Silver Foil Beads|4|H4-05-02
+FS1222-20PCS|FS1222- 16MM Glowing Sparkling Beads Fit For Beadable Pens|14|H4-05-03
+FS1645-10PCS|FS1645-20MM  Sparkling Beads Fit For Beadable Pen|4|H4-05-04
+FS3835-200PCS|FS3835-8mm White Crackle Glasses Beads For Jewelry Making DIY Supplies For Bracelets Necklace|5|H4-05-05
+FS6787-20PCS|FS6787-16MM Naruto Pattern Beads White Background|6|H4-05-06
+FS1013-Blue2-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|7|H4-05-07
+FS6895-20PCS|FS6895-21×17mm Random Mixed Dark Color Leopard Printed Acrylic Beads for DIY Jewelry Making Bracelet Necklace Crafts|7|H4-06-01
+FS1723-20PCS|FS1723-16MM Cracked Acrylic Beads Fit For Beadable Pens|6|H4-06-02
+FS5131-5PCS|FS5131- Uv Clear Color Heart Pendant Beads Translucent Uv Half-Hole Heart Beads Beads Charms|8|H4-06-03
+FS6266-5PCS|FS6266- 18mm Drilled Flower Ball Ceramic Clay Beads|6|H4-06-04
+FS3976-20PCS|FS3976-16mm Handmade Glass Beads Fit For Beadable Pens|4|H4-06-05
+FS5584-20PCS|FS5584- 16mm Cartoon Imitation Pearl Acrylic Beads|4|H4-06-06
+FS1013-Blue3-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|12|H4-06-07
+FS6338-20PCS|FS6338- 20mm UV Heart 4 Clover Beads|7|H4-07-01
+FS6751-20PCS|FS6751-16mm Cracked UV Coating Acrylic Beads|6|H4-07-02
+FS3431-5PCS|FS3431-17×31mm Heart Shape Resin Beads (Half Hole) For Making Pendant|8|H4-07-03
+FS3157-10PCS|FS3157- 45mm Two - Hole Glowing Moon Beads|4|H4-07-04
+FS3830-100g|FS3830- Purple Mixed-style Glass Beads|7|H4-07-05
+FS6475-200PCS|FS6475-8MM Gradient Mixed-color Acrylic Three-dimensional Gold Rose And Camellia Flower DIY Bracelet Necklace Keychain Jewelry Making|8|H4-07-06
+FS1013-Red-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|10|H4-07-07
+FS3753-20PCS|FS3753- Approximately 23×18mm Dried - Flower Cloud Resin Beads|5|H4-08-01
+FS3888-Gold-5PCS|FS3888- 25mm Half Hole Castle Beads (Not UV, Can Be Used As Pendent) For Pendent|6|H4-08-02
+FS5488-10PCS|FS5488- 20mm Gold Foil Resin Beads|8|H4-08-03
+FS0053-Mixed-20PCS|FS0053- 24mm Velvet Snowflake Beads|4|H4-08-04
+FS0592-10PCS|FS0592- Handmade Glasses Beads|43|H4-08-05
+FS4303-20PCS|FS4303- 16mm Mermaid Beads Luminous Glow-In-The-Dark|9|H4-08-06
+FS1013-Green-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|7|H4-08-07
+FS3754-20PCS|FS3754- Approximately 23×18mm Cloud Shell Gold Foil Resin Beads|8|H4-09-01
+FS6243-5PCS|FS6243- 30mm Glow-in-the-Dark Lotus Resin Half-Hole Beads|6|H4-09-02
+FS6337-20PCS|FS6337- 19mm Heart Gold Foil Resin Beads|7|H4-09-03
+FS2486-White-100PCS|FS2486- 18*5mm Bone Beads Fit For Pens|7|H4-09-04
+FS0581-Purple-10PCS|FS0581- 18mm Random Mixed Handmade Glass Beads, Hand-Woven Glass Beads, Pearl Beads|10|H4-09-05
+FS0469-20PCS|FS0469- 38mm Mixed Color Glowing Heart Bead FrameFit For Beadable Pens|5|H4-09-06
+FS1013-Pink-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|10|H4-09-07
+FS5311-50PCS|FS5311- 12mm Transparent Acrylic Beads (Pen Can Pass Through)|10|H4-10-01
+FS4294-Yellow-5PCS|FS4294- 25mm Gold Foil Dried Flower Half-Hole (Can Be Used As A Pendant)|8|H4-10-02
+FS5270-5PCS|FS5270- 18*23mm Heart Beads Love Oil Painting Beads Fit For Pen|6|H4-10-03
+FS2204-5PCS|FS2204-  HK Cat Paw Hand printed Beads Fit for Keychain Beadable pens making|8|H4-10-04
+FS0581-Blue-10PCS|FS0581- 18mm Random Mixed Handmade Glass Beads, Hand-Woven Glass Beads, Pearl Beads|14|H4-10-05
+FS4846-Mixed-5PCS|FS4846- 17mm×17mm Square Mocha Alloy Beads That Can Pass Through A Pen|7|H4-10-06
+FS1013-Grey-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|8|H4-10-07
+FS5304-500PCS|FS5304- 6mm AB Coated Translucent Acrylic Beads (Not Through Pen)|7|H4-11-01
+FS1228-20PCS|FS1228- 16MM Flash Chip Resin Beads Fit For Beadable Pens|29|H4-11-02
+FS6339-20PCS|FS6339- 17mm UV Heart Beads With Wrinkled Surface|9|H4-11-03
+FS4341-10PCS|FS4341- 20.5*18.5mm Hk Star Hand-Painted Beads For Keychain Beadable Pens Making|4|H4-11-04
+FS0581-Pink-10PCS|FS0581- 18mm Random Mixed Handmade Glass Beads, Hand-Woven Glass Beads, Pearl Beads|5|H4-11-05
+FS4484-4PCS|FS4484-18.5mm Sunflower Can Pass The Pen Metal Beads|4|H4-11-06
+FS1013-White-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|4|H4-11-07
+FS4125-100PCS|FS4125- 10mm Cat Eyes Beads Cat Eye Beads No Fit Pen No Fit Pen|7|H4-12-01
+FS3538-Grey-10PCS|FS3538- 20mm Glitter Resin Beads|4|H4-12-02
+FS5724-20PCS|FS5724- 17mm Cat-Eye Heart-Shaped Resin Beads|3|H4-12-03
+FS6103-Black-5PCS|FS6103-HK Hand-Painted Beads For Beadable Pen|4|H4-12-04
+FS0581-White-10PCS|FS0581- 18mm Random Mixed Handmade Glass Beads, Hand-Woven Glass Beads, Pearl Beads|5|H4-12-05
+FS3774-4PCS|FS3774- 19 * 20Mm Butterfly Diamonds Alloy Beads Zircon Butterfly Beads|5|H4-12-06
+FS1013-Mixed-10PCS|FS1013- 28MM Pearl Looking Flower Beads With  Ring Connector Fit For Beadable Pens|23|H4-12-07
+FS1928-20PCS|FS1928-16mm Random Mixed Color Resin Beads Fit For Beadable Pens|4|H4-13-01
+FS1940-10PCS|FS1940-20MM Random Mixed Color Pearl Resin Beads Fit For Beadable Pens|8|H4-13-02
+FS5723-20PCS|FS5723- 17mm Cat's Eye Fine Glitter Four - Leaf Clover Resin Beads|5|H4-13-03
+FS6103-Pink-5PCS|FS6103-HK Hand-Painted Beads For Beadable Pen|4|H4-13-04
+FS0581-Mixed-10PCS|FS0581- 18mm Random Mixed Handmade Glass Beads, Hand-Woven Glass Beads, Pearl Beads|11|H4-13-05
+FS6224-10PCS|FS6224- Alien Alloy Beads|6|H4-13-06
+FS1337-Purple-200PCS|FS1337-7mm Glass Valley Of Lilly For Making Car Hangers Or Spacers|4|H4-13-07
+FS3552-Blue Red-100PCS|FS3552-8mm Round Resin Beads with Glitter Powder Imitation Cat Eye Beads Loose Ball Spacer Beads for DIY Jewelry Bracelet Necklace Earring Making|5|H4-14-01
+FS5790-20PCS|FS5790- 16mm UV Galaxy Beads Fit For Pen|11|H4-14-02
+FS2481-20PCS|FS2481- 20MM Star Flash Chip Resin Beads Fit For Beadable Pens|5|H4-14-03
+FS4646-10PCS|FS4646- Melody Heart Love Beads For Keychain Beadable Pens Making|5|H4-14-04
+FS6369-Blue-100PCS|FS6369- 12mm Glass Bamboo Beads Glass Bamboo Beads|9|H4-14-05
+FS3151-10PCS|FS3151-Butterfly Metal Beads For Making Key Chain|7|H4-14-06
+FS1337-Pink-200PCS|FS1337-7mm Glass Valley Of Lilly For Making Car Hangers Or Spacers|3|H4-14-07
+FS3552-Blue-100PCS|FS3552-8mm Round Resin Beads with Glitter Powder Imitation Cat Eye Beads Loose Ball Spacer Beads for DIY Jewelry Bracelet Necklace Earring Making|5|H4-15-01
+FS1253-20PCS|FS1253- 16MM Round Mixed Color Glitter Resin Beads Fit For Beadable Pens|7|H4-15-02
+FS5888-30PCS|FS5888- 12.5mm High, 11mm Diameter, Cylindrical Resin Beads With Fine Glitter|9|H4-15-03
+FS6845-Purple-5PCS|FS6845-28*30MM Hand-Painted Creamy Cute Granules Fancy Beads For DIY Crafts Necklace Bracelets Beadable Pens|1|H4-15-04
+FS6369-White-100PCS|FS6369- 12mm Glass Bamboo Beads Glass Bamboo Beads|10|H4-15-05
+FS5514-20PCS|FS5514- 10mm Five - Petal Metal Beads Five - Petal Plum Blossom Metal Four - Way Beads|2|H4-15-06
+FS2408- Green-200PCS|FS2408- 8*10MM Size Clear Valley Of Lilly Flower For Making Car Hanger|8|H4-15-07
+FS3552-Red-100PCS|FS3552-8mm Round Resin Beads with Glitter Powder Imitation Cat Eye Beads Loose Ball Spacer Beads for DIY Jewelry Bracelet Necklace Earring Making|5|H4-16-01
+FS0602-20PCS|FS0602- 16mm Gold Foil Dried Flower Resin Beads (Not Uv Plated)|13|H4-16-02
+FS1182-20PCS|FS1182- 18MM Transparent Semi-Round Acrylic Beads Fit For Beadable Pens|7|H4-16-03
+FS6726-20PCS|FS6726-16mm Luminous Hand-Painted Beads For Keychain Beadable Pens Making|3|H4-16-04
+FS4384-Green-10PCS|FS4384- 12mm Glow-in-the-Dark + Softened Light Soft Flower Metal Beads|16|H4-16-05
+FS3150-2PCS|FS3150-22mm Square Crystal Alloy Beads For Keychain Jewelry Making|6|H4-16-06
+FS5689-100PCS|FS5689- UV Clear Petals Transparent Color-Coated Petals|16|H4-16-07
+FS5991-Purple-100PCS|FS5991- Approximately 8mm Resin Cat Eye Balls|6|H4-17-01
+FS1320-Mixed-20PCS|FS1320- 16mm Flower Flower Flash Chip Resin Beads|16|H4-17-02
+FS0607-20PCS|FS0607- 15mm UV Cylinder Solid-Color Pillar Shapes|4|H4-17-03
+FS6723-20PCS|FS6723-16mm Hand Painted Luminous Acrylic Beads|6|H4-17-04
+FS4384-Blue-10PCS|FS4384- 12mm Glow-in-the-Dark + Softened Light Soft Flower Metal Beads|7|H4-17-05
+FS2480-Mixed-10PCS|FS2480- 12mm 8 Hole Alloy Heart clover Beads For Keychain Jewelry Making|2|H4-17-06
+FS2770-White-100PCS|FS2770- Glass Melastoma petal Charms|20|H4-17-07
+FS6122-Pale Green-15PCS|FS6122- 16mm Castle UV Resin Beads|3|H4-18-01
+FS3539-20PCS|20Mm Fine Glitter Glow-In-The-Dark Resin Beads Person|20|H4-18-02
+FS4424-20PCS|FS4424- 15mm Mikko Square Beads|5|H4-18-03
+FS3995-5PCS|FS3995-Rhinestone Heart Frame Bead For Crafts DIY Jewelry Making|8|H4-18-04
+FS4384-Pink-10PCS|FS4384- 12mm Glow-in-the-Dark + Softened Light Soft Flower Metal Beads|5|H4-18-05
+FS3775-3PCS|FS3775- 21*16mm Butterfly Beads Oil-dripping Butterfly Rhinestone Alloy Beads|4|H4-18-06
+FS2770-Red-100PCS|FS2770- Glass Melastoma petal Charms|11|H4-18-07
+FS5886-100PCS|FS5886- 8mm Resin Beads Galaxy Resin Beads|11|H4-19-01
+FS3541-20PCS|FS3541- 16mm Fine Glitter Luminescent Resin Beads|25|H4-19-02
+FS2120-20PCS|FS2120-14MM Square Dried Flower Resin Beads Mixed Color|4|H4-19-03
+FS6847-Mixed-100PCS|FS6847-6*9MM Christmas Color Series Bead Clusters for DIY Keyrings Crafts Jewelry Making|5|H4-19-04
+FS4384-Orange-10PCS|FS4384- 12mm Glow-in-the-Dark + Softened Light Soft Flower Metal Beads|13|H4-19-05
+FS2480-Black-10PCS|FS2480- 12mm 8 Hole Alloy Heart clover Beads For Keychain Jewelry Making|3|H4-19-06
+FS2770-Pink-100PCS|FS2770- Glass Melastoma petal Charms|5|H4-19-07
+FS1557-200PCS|FS1557-Mixed Color Pearl Looking 4 Hole Acrylic beads Fit For Beadable Pens|8|H4-20-01
+FS1725-20PCS|FS1725-Star Flash Chips Resin Beads Fit For Beadable Pens|5|H4-20-02
+FS2191-20PCS|FS2191-About 14MM Size Frocked Acrylic Cube Beads Fit For Beadable Pens|8|H4-20-03
+FS3897-100PCS|FS3897- 8.5mm Pearl Cubes Beads - Can Pass Through A Pen|4|H4-20-04
+FS4932-10PCS|FS4932- 16mm Drilled Beads Heart Love|6|H4-20-05
+FS2480-Pink-10PCS|FS2480- 12mm 8 Hole Alloy Heart clover Beads For Keychain Jewelry Making|7|H4-20-06
+FS2770-Purple-100PCS|FS2770- Glass Melastoma petal Charms|12|H4-20-07
+FS1743-100PCS|FS1743-Random Mixed Color Crackle 8MM Acrylic Beads (Hole is tight )|27|H4-21-01
+FS6354-2-20PCS|FS6354- 16mm Cheese Color-Blocked Beads Fit For Pen|7|H4-21-02
+FS5303-10PCS|FS5303- Uv Loving Angel Wing Beads|5|H4-21-03
+FS1776-50PCS|FS1776 - 50PCS  10mm Glowing Glass Beads|19|H4-21-04
+FS6558-5PCS|FS6558-About 18MM Fancy Pumpkin Beads For Beadable Pen Keychain Jewelry Making|9|H4-21-05
+FS4482-4PCS|FS4482-17*19.5mm Small Hole But Pen Zircon Heart Zircon Diamond|8|H4-21-06
+FS2770-Blue-100PCS|FS2770- Glass Melastoma petal Charms|9|H4-21-07
+FS5133-100PCS|FS5133- 8mm Uv Solid Color Beads|16|H4-22-01
+FS6354-1-20PCS|FS6354- 16mm Cheese Color-Blocked Beads Fit For Pen|6|H4-22-02
+FS4046-10PCS|FS4046- Approximately 32×37mm Transparent Bowknot Acrylic Beads|10|H4-22-03
+FS3838-100PCS|FS3838-100mm Crackle Glass Beads  Round Crystal Glass Spacer Crafts Beads for Jewelry Making Necklace Bracelet Earrings DIY Crafts|6|H4-22-04
+FS6340-10PCS|FS6340- 18mm Heart Diamonds Fancy Beads, Heart-Shaped Diamond-Embellished Round Beads|1|H4-22-05
+FS3773-4PCS|FS3773-20mm Star Diamonds Alloy Beads Five-Pointed Star Cubic Zirconia Diamond Alloy Beads|6|H4-22-06
+FS2770-Red2-100PCS|FS2770- Glass Melastoma petal Charms|8|H4-22-07
+FS5991-Mixed-100PCS|FS5991- Approximately 8mm Resin Cat Eye Balls|4|H4-23-01
+FS6354-4-20PCS|FS6354- 16mm Cheese Color-Blocked Beads Fit For Pen|7|H4-23-02
+FS2525-Pink-200PCS|FS2525- 8mm Christmas Red AB Crystal Glass Beads Christmas Red Glass Beads|7|H4-23-04
+FS6343-10PCS|FS6343- 20mm Horse Eyes Diamonds Fancy Beads|4|H4-23-05
+FS5512-Blue-200PCS|FS5512- 11mm Ab Plated Small Flower With Holes|4|H4-23-06
+FS5988-10PCS|FS5988- Transparent Airbag Mobile Phone DIY Stand|5|H4-23-07
+FS6034-Mixed-100PCS|FS6034- 10Mm Optically Variable Glow-In-The-Dark Resin Beads|15|H4-24-01
+FS6354-5-20PCS|FS6354- 16mm Cheese Color-Blocked Beads Fit For Pen|6|H4-24-02
+FS1633-White-10PCS|FS1633-21MM UV Lotus Flower Fit For Beadable Pen|8|H4-24-03
+FS2525-Gray-200PCS|FS2525- 8mm Christmas Red AB Crystal Glass Beads Christmas Red Glass Beads|2|H4-24-04
+FS6559-5PCS|FS6559- 20*18 Pearl Chain Love Heart Beads Pearl Diamond Chain Love Heart Beads|8|H4-24-05
+FS6124-Mixed-20PCS|FS6124- 16mm Glow-in-the-dark Photochromic Resin Beads|42|H4-24-06
+FS6452-30PCS|FS6452-40×60mm Clear Note Book Acrylic Charms|49|H4-24-07
+FS4600-500PCS|FS4600- 2.4cm Length Gold  Eye Pin|8|H5-01-01
+FS3763-100PCS|FS3763- 4×6mm Solid-color Metal Peanut Beads|5|H5-01-02
+FS4697-Gold-3PCS|FS4697- Diamonds Gold Butterfly Pin with Pendent Hole|4|H5-01-03
+FS5849-20PCS|FS5849-25mm Triangle Column Based Beads|9|H5-01-04
+FS2395-100PCS|FS2395-5cm Length Random Mixed Color Chain|1|H5-01-05
+FS2009-Silver-1000PCS|FS2009- 4mm Two Layer Ring|23|H5-01-06
+FS6072-Gold-50g|FS6072-5cm length Eye Pin For DIY Jewelry Necklace Bracelet Making For DIY Projects|12|H5-01-07
+FS4577-Gold-500PCS|FS4577-About 3cm (1.2 Inches) Length Eye Pin For Jewelry Necklace Making|5|H5-02-01
+FS3764-50PCS|FS3764- 4×6mm Electroplated Silver Metal Peanut Beads For Keychain Jewelry Making|5|H5-02-02
+FS5977-2PCS|FS5977- Bowknot Infusion Needle|8|H5-02-03
+FS0619-10PCS|FS0619- 29MM Oval Based  Beads 12MM Thickness Fit For Beadable Pens|12|H5-02-04
+FS0908-Glod1-10PCS|FS0908- 25MM Mixed Color Stereoscopic Diamond Crown Alloy Spacer|5|H5-02-05
+FS2009-Gold-1000PCS|FS2009- 4mm Two Layer Ring|13|H5-02-06
+FS6072-Brown-50g|FS6072-5cm length Eye Pin For DIY Jewelry Necklace Bracelet Making For DIY Projects|12|H5-02-07
+FS5979-Blue-20PCS|FS5979- 40*55Mm Transparent Card Holder For Mobile Phone Back Cover With Hanging Hole|6|H5-03-01
+FS3748-Gold-500PCS|FS3748- 4*8Mm Goat Horn Nails|4|H5-03-02
+FS5851-50PCS|FS5851-13mm Cylindrical Based Beads|2|H5-03-04
+FS0908- Gold2-10PCS|FS0908- 25MM Mixed Color Stereoscopic Diamond Crown Alloy Spacer|7|H5-03-05
+FS2010-Gold-800PCS|FS2010- 5mm Two Layer Ring|11|H5-03-06
+FS2010-Silver-800PCS|FS2010- 5mm Two Layer Ring|6|H5-03-06
+FS5863-Silver-100g|FS5863- 1.6cm T-Shaped Pins (About 1100 PCS/100g)|6|H5-03-07
+FS5979-Clear-20PCS|FS5979- 40*55Mm Transparent Card Holder For Mobile Phone Back Cover With Hanging Hole|13|H5-04-01
+FS3563-Gold-500PCS|FS3563- 5*6mm Large-sized Cable Protection U-shaped Clips For DIY Projects|8|H5-04-02
+FS6174-Gold-5PCS|FS6174-Moon and Star Pin|7|H5-04-03
+FS5858-100PCS|FS5858-16×12mm Clear Cross Acrylic Base Beads|4|H5-04-04
+FS0908-Silver-10PCS|FS0908- 25MM Mixed Color Stereoscopic Diamond Crown Alloy Spacer|2|H5-04-05
+FS2011-Gold-500PCS|FS2011- 6mm Two Layer Ring|38|H5-04-06
+FS5882-Gold-100g|FS5882- 2.6cm T-Shaped Pins (About 990 PCS/100g)|6|H5-04-07
+FS6188-WS-5PCS|FS6188- Metal Rotary Buckle, Mobile Phone Back Shell Gasket|6|H5-05-01
+FS1801-Silver-300PCS|FS1801- 13×6.5mm eye Hook For Making Pendant For DIY Project|4|H5-05-02
+FS4814-20PCS|FS4814- 6mm $ Symbol Alloy Nail Stickers|7|H5-05-03
+FS0857-10PCS|FS0857-20MM Cylindrical Bottom Bead Fit For Beadable Pen|13|H5-05-04
+FS1114-Gold-10PCS|FS1114-15MM  Sliver Crown Spacer Fit For Beadspen Beads|6|H5-05-05
+FS2011-Silver-500PCS|FS2011- 6mm Two Layer Ring|34|H5-05-06
+FS6053-Gold-500PCS|FS6053- 5cm Long Length, 1.8mm Head, Lily - of - the - Valley Ball Needle|9|H5-05-07
+FS6188-BG-5PCS|FS6188- Metal Rotary Buckle, Mobile Phone Back Shell Gasket|9|H5-06-01
+FS3506-100PCS|FS3506- 10mm Lobster Clasps Lobster Clasps|9|H5-06-02
+FS4388-Pink-5PCS|FS4388-Flash Chip Metal Beads For Keychain Jewelry Making|4|H5-06-03
+FS0836-10PCS|FS0836-22MM Long Octagonal Pillar Fit For Beadable Pens|12|H5-06-04
+FS1114-Rose Gold-10PCS|FS1114-15MM  Sliver Crown Spacer Fit For Beadspen Beads|8|H5-06-05
+FS2012-Silver-400PCS|FS2012- 8mm Two Layer Ring|7|H5-06-06
+FS1521-Silver-500PCS|FS1521- 1.8mm Round Head 20mm Pin For Making Valley Of Lily|14|H5-06-07
+FS6188-WG-5PCS|FS6188- Metal Rotary Buckle, Mobile Phone Back Shell Gasket|10|H5-07-01
+FS5859-100PCS|FS5859- 6*12Mm Colorful Lobster Clasps|4|H5-07-02
+FS3057-Gold-10PCS|FS3057-Alloy Butterfly Pendant With Loop For Necklace Bracelet Earring Key Ring DIY Jewellery Making(Not For Beadable Pens)|5|H5-07-03
+FS0830-20PCS|FS0830-16MM Facted Clear Based Beads Fit For Beadable Pens|5|H5-07-04
+FS1114-White-10PCS|FS1114-15MM  Sliver Crown Spacer Fit For Beadspen Beads|5|H5-07-05
+FS6083-Silver-100g|FS6083- 6mm Closed Jump Rings Closed And Open Loops|3|H5-07-06
+FS2317-Gold-500PCS|FS2317-2.3mm Head Length 20mm Pin For Making Valley Of Lily For DIY Project|14|H5-07-07
+FS6188-BS-5PCS|FS6188- Metal Rotary Buckle, Mobile Phone Back Shell Gasket|8|H5-08-01
+FS6029-5PCS|FS6029- 18*12mm Ring Setting|5|H5-08-02
+FS4033-Gold-2PCS|FS4033- 18K Gold Fish Tail Pin (For Half-Hole Beads)|7|H5-08-03
+FS0855-10PCS|FS0855-21MM Cylindrical Bottom Bead Fit For Beadable Pen|5|H5-08-04
+FS1114-Black-10PCS|FS1114-15MM  Sliver Crown Spacer Fit For Beadspen Beads|5|H5-08-05
+FS6083-Gold-100g|FS6083- 6mm Closed Jump Rings Closed And Open Loops|6|H5-08-06
+FS1524-25PCS|FS1524- 100mm Moon Shape Copper Plated Steel Ring For Making Car Hanger|12|H5-08-07
+FS2248-20PCS|FS2248- Mobile Phone Lanyard Gasket|10|H5-09-01
+FS6030-5PCS|FS6030- 18*16mm Ring Setting|8|H5-09-02
+FS5913-2-1PCS|FS5913- Copper-Plated Cubic Zirconia Pendant|14|H5-09-03
+FS5466-10PCS|FS5466- 31*25Mm 3D Rhombus Based Beads, Stereoscopic Rhombus Bottom Beads, Fit For Pen|4|H5-09-04
+FS2929-20PCS|FS2929- 20 Pieces Clamp With 2 sides Tapes|2|H5-09-05
+FS1527-25PCS|FS1527-Copper Ring For Making Car Hanger|10|H5-09-06
+FS1526-25PCS|FS152-Copper Ring For Making Car Hanger|44|H5-09-07
+FS5130-Silver-50PCS|FS5130-45mm Pin With Pearl, Pin Bady Long 40mm For DIY Projects|17|H5-10-01
+FS6031-5PCS|FS6031- 18*14mm Ring Base|7|H5-10-02
+FS5913-3-1PCS|FS5913- Copper-Plated Cubic Zirconia Pendant|8|H5-10-03
+FS5671-20PCS|FS5671- Height 25mm, A Transparent Cylindrical Bead With A Height Of 25mm And A Width Of 11mm|10|H5-10-04
+FS6070-RoseRed-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|3|H5-10-05
+FS1528-25PCS|FS1528-110MM Copper Ring For Making Car Hanger|10|H5-10-06
+FS5999-Gold-20PCS|FS5999- 5.8cm Pearl + Spacer Pin With Pearl Pendant Pearl + Spacer Pin With Pearl Pendant|6|H5-10-07
+FS5130-Gold-50PCS|FS5130-45mm Pin With Pearl, Pin Bady Long 40mm For DIY Projects|18|H5-11-01
+FS6032-5PCS|FS6032- The Setting Of The 18*18mm Ring Is Lost|8|H5-11-02
+FS5913--4-1PCS|FS5913- Copper-Plated Cubic Zirconia Pendant|7|H5-11-03
+FS5961-10PCS|FS5961-Clear Based Beads|6|H5-11-04
+FS6070-Orange-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|3|H5-11-05
+FS6084-Silver-100g|FS6084- 7mm Closed Jump Rings Closed And Open Loops For DIY Projects|5|H5-11-06
+FS6021-20PCS|FS6021- Pin Large Safety Pin - Length 65mm * Wire Diameter 1.5mm|15|H5-11-07
+FS3480-Gold-100PCS|FS3480- 1.5×20Mm Twisted Tube|14|H5-12-01
+FS5974-Gold-2PCS|FS5974- Bow - shaped IV Infusion Needle|6|H5-12-02
+FS5913-5-1PCS|FS5913- Copper-Plated Cubic Zirconia Pendant|20|H5-12-03
+FS5962-20PCS|FS5962-36×13mm Clear Based Beads|6|H5-12-04
+FS6070-Pink-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|0|H5-12-05
+FS2059-Silver-500PCS|FS2059- Connector Clasps For DIY Project|14|H5-12-06
+FS5866-20PCS|FS5866- 6.5cm Big Size Silver Pins With Four Hanging Holes|15|H5-12-07
+FS3480-Silver-100PCS|FS3480- 1.5×20Mm Twisted Tube|7|H5-13-01
+FS2646-Silver-100PCS|FS2646- Twist Alloy Beaded Bracelet|5|H5-13-02
+FS5913-1-1PCS|FS5913- Copper-Plated Cubic Zirconia Pendant|13|H5-13-03
+FS1493-20PCS|FS1493- 24mm Bottom Bead|4|H5-13-04
+FS6070-Blue-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|5|H5-13-05
+FS6177-Gold-100PCS|FS6177- 6.5×28mm 4 Section Chain Gold And Silver 4-Section Chain|7|H5-13-06
+FS6481-Silver-200PCS|FS6481- Approximately 20Mm Jewelry Accessories Ear Hooks|14|H5-13-07
+FS6945-200PCS|FS6945-20*2MM DIY Bracelet Connection Beads Curved Tube Findings|9|H5-14-01
+FS3818-Gold-100PCS|FS3818-12mm  Gold Plated Long Lasting Round Bead Frame Spacer Beads For Jewelry DIY Bracelet Necklace Making|8|H5-14-02
+FS5874-2PCS|FS5874- Butterfly Cubic Zirconia Tassel Pendant|9|H5-14-03
+FS4590-30PCS|FS4590- 12mm Clear Cubes Beads Transparent Square Beads Fit For Pen|2|H5-14-04
+FS6070-Purple-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|6|H5-14-05
+FS6752-Rose Gold-100PCS|FS6752-6.5×28mm 4 Section Chain|7|H5-14-06
+FS6481-Gold-200PCS|FS6481- Approximately 20Mm Jewelry Accessories Ear Hooks|20|H5-14-07
+FS2517-100PCS|FS2517-100PCS  2.9*2.4MM Steel wire positioning beads|7|H5-15-01
+FS6136-Black-1000PCS|FS6136- 2mm Metal Beads|4|H5-15-02
+FS1078-20PCS|FS1078- 20*37mm Clear Color Rectangle Based Beads Fit For Beadable Pens|10|H5-15-03
+FS5771-10PCS|FS5771- Duck-bill Clip With A Length Of 7.5 Cm And A Width Of 0.9 Cm|-1|H5-15-04
+FS6070-RoyalBlue-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|9|H5-15-05
+FS0008-50PCS|FS0008-14mm Flower Metal Spacer For Pens Bracelet Necklace Jewelry Making|6|H5-15-06
+FS4487-20PCS|FS4487- 5cm Random Mixed Color Clothes Pin With 3 Hooks For DIY Projects|23|H5-15-07
+FS5810-Silver-100PCS|FS5810- Round Locating Buckle Steel Wire Locating Buckle|9|H5-16-01
+FS6134--1000PCS|FS6134- 3mm High-Quality Copper Spacer Beads For DIY Projects|7|H5-16-02
+FS1207-10PCS|FS1207- 20mm Round Based Beads Transparent Round Bottom Beads|6|H5-16-03
+FS5454-Black-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|4|H5-16-04
+FS6070-Yellow-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|6|H5-16-05
+FS2706-1PCS|FS2706-A5 DIY Shaker Notebook|8|H5-16-06
+FS5725-200PCS|FS5725- 8mm Colorful Open Rings For DIY Projects|25|H5-16-07
+FS5810-Black-100PCS|FS5810- Round Locating Buckle Steel Wire Locating Buckle|11|H5-17-01
+FS2659-Gold-20PCS|FS2659-10mm Spacer Connector|15|H5-17-02
+FS5577-50PCS|FS5577- 12mm Clear Round Based Beads Fit For Pen|7|H5-17-03
+FS5454-Yellow-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|2|H5-17-04
+FS6070-LightPurple-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|3|H5-17-05
+FS1322-200PCS|FS1322-10MM Sliver Flower Spacer Fit For Beadable Pens|20|H5-17-06
+FS5817-500PCS|FS5817- 10mm Colorful Jump Ring|6|H5-17-07
+FS5810-Gold-100PCS|FS5810- Round Locating Buckle Steel Wire Locating Buckle|8|H5-18-01
+FS6505-Gold-1000PCS|FS6505-3mm Gold Plated Copper Spacer|4|H5-18-02
+FS1199-10PCS|FS1199- 45MM Big Butterfly Based Beads Fit For Beadable Pens|9|H5-18-03
+FS6070-White-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|5|H5-18-05
+FS0020-20PCS|FS0020-100mm Sliver Plated Metal Wire Ring For Making Car Hangers|4|H5-18-06
+FS6019-50PCS|FS6019-38mm*10mm  Big Head Safety Pin|6|H5-18-07
+FS3610-Gold-100PCS|FS3610- 5mm Metal 4 Hole Beads Gold-plated And Silver-plated Small Metal Four-way Beads For DIY Projects|6|H5-19-01
+FS6505-Silver-1000PCS|FS6505-3mm Gold Plated Copper Spacer|2|H5-19-02
+FS0740-20PCS|FS0740- 20mm Clear Round Plate Based Beads, 5Mm Thick|19|H5-19-03
+FS5454-LightBlue-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|6|H5-19-04
+FS6070-Green-1PCS|FS6070-  16*4.5cm Heart Plush Mountaineering Keychain|6|H5-19-05
+FS6022-10PCS|FS6022-75mm*1.8mm Big Head Safety Pin|8|H5-19-07
+FS6125-Pink-1PCS|FS6125- 3.5mm Glass Beads Color-Plated High-Brightness Glass Beads (About 105-115 PCS/Strand)|6|H5-20-01
+FS6841-10PCS|FS6841-Double Spider Metal Spacer Bead for DIY Jewelry Making Necklace Bracelet Earrings Keychain Making|7|H5-20-02
+FS0605-20PCS|FS0605-16MM Clear Square Cubes Based Beads Fit For Beadable Pens|7|H5-20-03
+FS5454-Blue-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|3|H5-20-04
+FS0874-Purple-10PCS|FS0874-25MM Mixed Color Cake bottom bead Fit For Beadspen Beads|3|H5-20-05
+FS5084-Silver-1Bags|FS5084- 50 Pcs/Bag 20mm Tinplate Strapping With Teeth|25|H5-20-06
+FS6238-200PCS|FS6238- 17mm Twisted Five-Pointed Star Metal Ring|6|H5-20-07
+FS6125-Blue-1PCS|FS6125- 3.5mm Glass Beads Color-Plated High-Brightness Glass Beads (About 105-115 PCS/Strand)|5|H5-21-01
+FS6151-20PCS|FS6151- 25*31Mm Heart Plate Based Beads, Heart-Shaped Round Plate Bottom Beads|6|H5-21-03
+FS0874-Pink-10PCS|FS0874-25MM Mixed Color Cake bottom bead Fit For Beadspen Beads|2|H5-21-05
+FS6912-10PCS|FS6912-20MM Metal Memory Ring Band|6|H5-21-06
+FS6052-20PCS|FS6052-25*25mm Metal Gradient Heart Keychain|14|H5-21-07
+FS6125-Purple-1PCS|FS6125- 3.5mm Glass Beads Color-Plated High-Brightness Glass Beads (About 105-115 PCS/Strand)|8|H5-22-01
+FS0962-Gold-100PCS|FS0962- 8×11mm Spacers Connect with points|5|H5-22-02
+FS5454-Green-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|1|H5-22-03
+FS0874-White-10PCS|FS0874-25MM Mixed Color Cake bottom bead Fit For Beadspen Beads|3|H5-22-05
+FS4382-20PCS|FS4382- 20mm Key Ring Keychain|5|H5-22-06
+FS5950-20PCS|FS5950- 27mm Strawberry Keychain, Baked - Enamel Strawberry Key Ring|13|H5-22-07
+FS2349-Gold-500PCS|FS2349- 2MM Bead Color|5|H5-23-01
+FS6137-Gold-500PCS|FS6137- 4mm Copper Metal Spacer Beads Fit For Pen For DIY Project|5|H5-23-02
+FS5454-Brown-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|9|H5-23-03
+FS5454-Pink-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|4|H5-23-04
+FS0874-Blue-10PCS|FS0874-25MM Mixed Color Cake bottom bead Fit For Beadspen Beads|4|H5-23-05
+FS5656-20PCS|FS5656- 17*27mm Rectangular Keychain|5|H5-23-06
+FS5721-20PCS|FS5721- 20mm Solid Color Keychain (Unplated)|21|H5-23-07
+FS2349-Silver-500PCS|FS2349- 2MM Bead Color|7|H5-24-01
+FS0017-Gold-500PCS|FS0017- 5mm Metal Beads Fit for Beadable Pens|14|H5-24-02
+FS5454-White-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|5|H5-24-03
+FS5454-LightPink-50PCS|FS5454- 20mm Round Plate Based Beads, Round Plate Bottom Beads, Thickness 5mm, Fit Pen For DIY Project|5|H5-24-04
+FS0023-20PCS|FS0023-100mm Gold Plated Wire Ring For Making Car Hangers|0|H5-24-05
+FS5928-20PCS|FS5928- 26*16Mm Heart Key Chain Ring Baked Enamel Heart-Shaped Keychain|4|H5-24-06
+FS6197-10PCS|FS6197- 34×34mm Heart Gradient-Color Keychain Ring Gradient-Color Heart Keychain|6|H5-24-07
+FS0019-Sliver-20PCS|FS0019-80mm  Car Hanger Ring|4|H6-01-01
+FS1515-Clear Black-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-01-02
+FS5710-Green-100g|FS5710-1MM Hexagonal Laser Glitter Flash|6|H6-01-03
+FS2581-100g|FS2581-2mm  Glass Beads Small Glass Beads No Hole Tiny Glass Bubble Beads  Mini Tiny Micro Round Iridescent UV Resin Seed Bead Bulk for Jewelry Making Adult Shaker Filler Nail Art Craft|9|H6-01-04
+FS2966-Purple-100g|FS2966- Broken Glass Sand|25|H6-01-05
+FS1352-1-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|27|H6-01-06
+FS0923-5Rolls|FS0923- 5 Meters/Roll 1.5cm Width Beads Tapes|409|H6-01-07
+FS0923-1Roll|FS0923- 5 Meters/Roll 1.5cm Width Beads Tapes|396|H6-01-07
+FS6852-2PCS|FS6852-Make-up Mirror Phone Clip For DIY Project|8|H6-02-01
+FS1515-SolidBlackAB-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|5|H6-02-02
+FS5710-Blue-100g|FS5710-1MM Hexagonal Laser Glitter Flash|6|H6-02-03
+FS2582-Blue-100g|FS2582-4mm  Glass Beads Small Glass Beads No Hole Tiny Glass Bubble Beads  Mini Tiny Micro Round Iridescent UV Resin Seed Bead Bulk for Jewelry Making Adult Shaker Filler Nail Art Craft|6|H6-02-04
+FS2966-Light Green-100g|FS2966- Broken Glass Sand|27|H6-02-05
+FS1352-2-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|11|H6-02-06
+FS1470-1Roll|FS1470- 5 Meters/Roll 2.3cm Width Beads Tapes|643|H6-02-07
+FS2994-Clear AB White-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|7|H6-03-01
+FS1515-SoildDarkRed-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|5|H6-03-02
+FS2097-1-125g|FS2097- 2mm Silver bottom Diamonds Sugar|12|H6-03-03
+FS3640-Yellow-2000PCS|FS3640- 5mm Ab Color Half Round Pearl Colored Plated Half Round Pearl|7|H6-03-04
+FS2966-Violet-100g|FS2966- Broken Glass Sand|41|H6-03-05
+FS1352-3-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|47|H6-03-06
+FS1392-1Roll|FS1392- 5 Meters/Roll Clear Pen Wraps Pen Tapes (Width:2.7cm,used 125pcs Pens Or 20mm Based Beads)|99|H6-03-07
+FS2994-White-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|11|H6-04-01
+FS1515-SolidAmethyst-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|9|H6-04-02
+FS2097-2-125g|FS2097- 2mm Silver bottom Diamonds Sugar|28|H6-04-03
+FS3640-White-2000PCS|FS3640- 5mm Ab Color Half Round Pearl Colored Plated Half Round Pearl|9|H6-04-04
+FS2967-Brown-100g|FS2967- Uv Broken Glass Sand Colored Plated Broken Glass Sand|12|H6-04-05
+FS1352-4-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|13|H6-04-06
+FS10166-1Roll|FS10166-5 Meters/Roll Width 1.0cm Beads Tape For  Beads|37|H6-04-07
+FS1301-Clear Light Pink-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|12|H6-05-01
+FS1515-SolidGrey-1Roll|FS1515- Width 1.2cm Pearl Dianond Tape For Making Fancy Bead|8|H6-05-02
+FS2097-3-125g|FS2097- 2mm Silver bottom Diamonds Sugar|12|H6-05-03
+FS3640-Purple-2000PCS|FS3640- 5mm Ab Color Half Round Pearl Colored Plated Half Round Pearl|6|H6-05-04
+FS2967-Blue-100g|FS2967- Uv Broken Glass Sand Colored Plated Broken Glass Sand|13|H6-05-05
+FS1469-1Roll|FS1469- 5 Meters/Roll 2cm Width Beads Tapes|190|H6-05-06
+FS1352-5-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|6|H6-05-07
+FS1301-Clear Purple-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|12|H6-06-01
+FS1301-Clear Pink Blue Green-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|7|H6-06-02
+FS2097-4-125g|FS2097- 2mm Silver bottom Diamonds Sugar|12|H6-06-03
+FS3640-Pink-2000PCS|FS3640- 5mm Ab Color Half Round Pearl Colored Plated Half Round Pearl|8|H6-06-04
+FS2967-Green-100g|FS2967- Uv Broken Glass Sand Colored Plated Broken Glass Sand|16|H6-06-05
+FS1352-6-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|15|H6-06-06
+FS1384-50PCS|FS1384- Pre-Cut Pen Wraps Pen Tapes (Size For Regular Beadable Pens)|3|H6-06-07
+FS1301-Clear White-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H6-07-01
+FS2994-Blue-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|7|H6-07-02
+FS2097-5-125g|FS2097- 2mm Silver bottom Diamonds Sugar|7|H6-07-03
+FS6570-Blue-100g|FS6570- 2-5mm Mixed Refills Pearl + Rhinestone + Glass Bead + Heart Flash + Love Sequins|7|H6-07-04
+FS2967-Silver-100g|FS2967- Uv Broken Glass Sand Colored Plated Broken Glass Sand|7|H6-07-05
+FS1352-7-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|14|H6-07-06
+FS1515-Clear Light Brown-1 Rolls|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|4|H6-07-07
+FS1301-Clear Creamy White-4 Meters|FS0880-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H6-08-01
+FS2994-Champagne-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|4|H6-08-02
+FS2097-6-125g|FS2097- 2mm Silver bottom Diamonds Sugar|9|H6-08-03
+FS6570-White-100g|FS6570- 2-5mm Mixed Refills Pearl + Rhinestone + Glass Bead + Heart Flash + Love Sequins|7|H6-08-04
+FS1441-1-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|39|H6-08-05
+FS1352-8-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|13|H6-08-06
+FS1515-SolidRoyalblue-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|7|H6-08-07
+FS1301-Solid Champange-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H6-09-01
+FS2994-Pink-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|13|H6-09-02
+FS6298-Red-100g|FS6298- Uv Color Glass Sand + Pearl Mixed: Colored Plated Glass Sand + Pearl Mixed Style|21|H6-09-03
+FS6570-Green-100g|FS6570- 2-5mm Mixed Refills Pearl + Rhinestone + Glass Bead + Heart Flash + Love Sequins|12|H6-09-04
+FS1441-2-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|21|H6-09-05
+FS1352-9-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|5|H6-09-06
+FS1515-SolidRoseRed-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|3|H6-09-07
+FS1301-Clear Grey-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H6-10-01
+FS2994-Clear AB Pink-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|4|H6-10-02
+FS6298-Silver-100g|FS6298- Uv Color Glass Sand + Pearl Mixed: Colored Plated Glass Sand + Pearl Mixed Style|9|H6-10-03
+FS6570-Pale-Yellow-100g|FS6570- 2-5mm Mixed Refills Pearl + Rhinestone + Glass Bead + Heart Flash + Love Sequins|9|H6-10-04
+FS1441-3-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|26|H6-10-05
+FS1352-10-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|13|H6-10-06
+FS1515-SolidPeacockBlue-1Roll|FS1515- Width 1.2cm Pearl Dianond Tape For Making Fancy Bead|8|H6-10-07
+FS1301-Clear Champange-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|11|H6-11-01
+FS2994-Clear AB Pink+AB Blue-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|9|H6-11-02
+FS6298-Blue-100g|FS6298- Uv Color Glass Sand + Pearl Mixed: Colored Plated Glass Sand + Pearl Mixed Style|5|H6-11-03
+FS6570-Pink-100g|FS6570- 2-5mm Mixed Refills Pearl + Rhinestone + Glass Bead + Heart Flash + Love Sequins|9|H6-11-04
+FS1441-4-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|10|H6-11-05
+FS1352-11-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|20|H6-11-06
+FS1515-SolidGold-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|8|H6-11-07
+FS2187-2Meters|FS2187-2 Meters Pearl Chain For Making Fancy Beads|13|H6-12-01
+FS2994-Clear AB Blue-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|10|H6-12-02
+FS6298-Dark Purple-100g|FS6298- Uv Color Glass Sand + Pearl Mixed: Colored Plated Glass Sand + Pearl Mixed Style|17|H6-12-03
+FS6512-1-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|5|H6-12-04
+FS1441-5-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|19|H6-12-05
+FS1352-12-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|3|H6-12-06
+FS1515-ClearChampagne-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-12-07
+FS6147-Gold-5M|FS6147- 3mm Pearl + Crystal Chain For DIY Projects|5|H6-13-01
+FS2994-AB Black-4Meters|FS2994- 9mm Width, Sugar Diamonds Wraps tapes With Silver Chain In Middle Diamonds Tapes for Making Fancy Beads|6|H6-13-02
+FS6298-Dark Pink-100g|FS6298- Uv Color Glass Sand + Pearl Mixed: Colored Plated Glass Sand + Pearl Mixed Style|23|H6-13-03
+FS6512-2-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|5|H6-13-04
+FS1441-6-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|5|H6-13-05
+FS1352-13-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|9|H6-13-06
+FS1515-ClearLightYellow-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-13-07
+FS2087- Gold Chain4mm-5Meter|FS2087- 5 Meter 4mm 6mm 8mm Pearl Chain FS2087 FS2088 FS2089|10|H6-14-01
+FS1301-Solid Mint Green-4 Meters|FS0880-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|32|H6-14-02
+FS1378-Black-100g|FS1378- 0.8mm mini Glass Beads For making fancy pens or beads Accessories|5|H6-14-03
+FS6512-3-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|9|H6-14-04
+FS1441-7-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|7|H6-14-05
+FS1352-14-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|25|H6-14-06
+FS1515-ClearDarkRed-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-14-07
+FS2993-Rose Red-5Meters|FS2993-Plated Pearl Beads Chain Bulk for Jewelry Making 4mm Pearls Beaded Brass Oval Link Chains Roll Spool for DIY Craft Jewelry Making|12|H6-15-01
+FS1301-Solid Pink-4 Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|6|H6-15-02
+FS1378-RBP-100g|FS1378- 0.8mm mini Glass Beads For making fancy pens or beads Accessories|17|H6-15-03
+FS6512-4-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|4|H6-15-04
+FS1441-8-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|6|H6-15-05
+FS1352-15-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|19|H6-15-06
+FS1515-ClearRoseRed-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|5|H6-15-07
+FS2993-Black-5Meters|FS2993-Plated Pearl Beads Chain Bulk for Jewelry Making 4mm Pearls Beaded Brass Oval Link Chains Roll Spool for DIY Craft Jewelry Making|4|H6-16-01
+FS1301-4m|FS1301- 9Mm Chain Diamond Tape Gold Base Chain Diamond Sticker|9|H6-16-02
+FS1378-BPW-100g|FS1378- 0.8mm mini Glass Beads For making fancy pens or beads Accessories|10|H6-16-03
+FS6512-5-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|8|H6-16-04
+FS1441-9-125g|AB Sugar Crystal Diamonds (1.5mm Size) For Making Sugar Beads and Sugar Pens|17|H6-16-05
+FS1352-16-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|9|H6-16-06
+FS1515-SolidBlue Black-1Roll|FS1515- Width 1.2cm Pearl Dianond Tape For Making Fancy Bead|4|H6-16-07
+FS2993-Purple-5Meters|FS2993-Plated Pearl Beads Chain Bulk for Jewelry Making 4mm Pearls Beaded Brass Oval Link Chains Roll Spool for DIY Craft Jewelry Making|16|H6-17-01
+FS1301-Solid Black Blue-4 Meters|FS0880-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|5|H6-17-02
+FS1378-Pink-100g|FS1378- 1mm mini Glass Beads For making fancy pens or beads Accessories|9|H6-17-03
+FS6512-6-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|8|H6-17-04
+FS1115-1-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|19|H6-17-05
+FS1352-17-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|17|H6-17-06
+FS1515-Clear Dark Pink -1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|4|H6-17-07
+FS2557-TesselChain34mm Red-30 CM|FS2557-Dangling Chain For Making Fancy Beads|16|H6-18-01
+FS1301-Solid Red-4Meters|FS1301-0.9cm Width Sugar Diamonds Wraps tapes With Gold Chain In Middle For Making Fancy Bead|7|H6-18-02
+FS1378-Red-100g|FS1378- 1mm mini Glass Beads For making fancy pens or beads Accessories|9|H6-18-03
+FS6512-7-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|14|H6-18-04
+FS1115-2-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|61|H6-18-05
+FS1352-18-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|18|H6-18-06
+FS1515-ClearCandyGreen-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-18-07
+FS2557-TesselChain34mm Blue-30 CM|FS2557-Dangling Chain For Making Fancy Beads|11|H6-19-01
+FS1674-1.5mm-Pink- 10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|38|H6-19-02
+FS3569-100g|FS3569-0.8MM Silver Mini Glass Beads|9|H6-19-03
+FS6512-8-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|8|H6-19-04
+FS1115-3-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|43|H6-19-05
+FS1352-19-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|17|H6-19-06
+FS2267-5PCS|FS2267- Full Diamonds Butterfly Charms|8|H6-20-01
+FS1674-1.5mm-Purple-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|30|H6-20-02
+FS4067-10m|FS4067-2MM Crystal Rhinestone Close Chain Trim for Sewing Crocs Shoes Clothes Cups, SS6 Claw Rhinestone Chain for Craft Jewelry Wedding Bouquet DIY Decoration|8|H6-20-03
+FS6512-9-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|6|H6-20-04
+FS1115-4-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|86|H6-20-05
+FS1352-20-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|45|H6-20-06
+FS1515-ClearBaby DarkPink-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|4|H6-20-07
+FS3565-Mixed-100 PCS|FS3565-Colorful Chain|13|H6-21-01
+FS1674-1.5mm-Black-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|18|H6-21-02
+FS2513-30CM|FS2513-30CM Long Tassel Claw Chain|8|H6-21-03
+FS6512-10-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|18|H6-21-04
+FS1115-5-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|12|H6-21-05
+FS1352-21-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|13|H6-21-06
+FS1515-SolidSliver-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|4|H6-21-07
+FS6126-30PCS|FS6126- Hand-Feel Fluorescent Studded DIY Chain Rings|6|H6-22-01
+FS1674-1.5mm-Champagne-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|17|H6-22-02
+FS0978-Pruple -10Meters|FS0978- 2mm Diamonds Chain For Making Fancy Pen Or Fancy Beads|11|H6-22-03
+FS6512-11-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|10|H6-22-04
+FS1115-6-125g|FS1115- 2MM Crystal AB Sugar Diamonds For Making Sugar Beads Or Sugar Beadable Pens|17|H6-22-05
+FS1352-22-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|6|H6-22-06
+FS1515-SolidBlack-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|6|H6-22-07
+FS1674-1.5mm-White-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|3|H6-23-01
+FS1674-1.5mm-Red-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|21|H6-23-02
+FS0978-Champagne-10Meters|FS0978- 2mm Diamonds Chain For Making Fancy Pen Or Fancy Beads|6|H6-23-03
+FS6512-12-100g|FS6512-Mixed 2MM Sugar Diamonds + 3MM and 4MM Pearl for Sweets Ice Cubes Jelly Fondant Decoration Sugar Paste Soap Jewellery DIY|3|H6-23-04
+FS1352-25-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|4|H6-23-05
+FS1352-23-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|10|H6-23-06
+FS1515-Clear Mint Green-1Roll|FS1515- Width 1.5cm Pearl Dianond Tape For Making Fancy Bead|7|H6-23-07
+FS1674-1.5mm-Blue-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|14|H6-24-01
+FS1674-1.5mm-Dark Blue-10 Meter|FS1674- 1.5mm Diamonds Chain For DIY Making Beads and making Fancy Pens|13|H6-24-02
+FS0978-Red-10Meters|FS0978- 2mm Diamonds Chain For Making Fancy Pen Or Fancy Beads|10|H6-24-03
+FS1515-Green 2-1 Roll (2.5 Meters)|FS1515- Width 1.2cm Pearl Dianond Tape For Making Fancy Bead|7|H6-24-04
+FS1352-26-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|20|H6-24-05
+FS1352-24-100g|FS1352- 3mm Non Hotfix Jelly Rhinestones Sugar Diamonds For Making Fancy Pens Or Fancy Beads|16|H6-24-06
+FS1515-Solid Mint Green-1 Roll (2.5 Meters)|FS1515- Width 1.2cm Pearl Dianond Tape For Making Fancy Bead|6|H6-24-07
+FS10180-Black-2PCS|FS10180-7.5cm Fabric Rose|4|H9-01-01
+FS10216-Mixed-5PCS|FS10216-Random Mixed Color Feather Bow|5|H9-01-02
+FS10180-Brown-2PCS|FS10180-7.5cm Fabric Rose|5|H9-02-01
+FS10201-Light Pink-100PCS|FS10201-About 17mm Farbic Bow Patch|10|H9-02-02
+FS10180-Grey-2PCS|FS10180-7.5cm Fabric Rose|5|H9-03-01
+FS10219-Mixed-300PCS|FS10219-Superhero Nail Art Stickers|11|H9-03-02
+FS10180-DarkRed-2PCS|FS10180-7.5cm Fabric Rose|4|H9-04-01
+FS10220-Mixed-200PCS|FS10220-Jikawai Nail Stickers|15|H9-04-02
+FS10192-White-5PCS|FS10192-About 10cm Pearl Lace Fabric Bowknot|4|H9-05-01
+FS10221-Mixed-300PCS|FS10221-Zootopia Nail Stickers|5|H9-05-02
+FS10192-Pink-5PCS|FS10192-About 10cm Pearl Lace Fabric Bowknot|1|H9-06-01
+FS10222-Mixed-300PCS|FS10222-Princess Nail Stickers|8|H9-06-02
+FS10194-7PCS|FS10194-Approximately 4×5.3cm Bowknot|8|H9-07-01
+FS10223-Mixed-200PCS|FS10223-Strawberry Girl Nail Stickers|10|H9-07-02
+FS10195-1Meter|FS10195-4mm Pearl Claw Chain|8|H9-08-01
+FS10196-Pink-200PCS|FS10196-Sanrio Mixed Style Nail Stickers|12|H9-09-01
+FS10199-5PCS|FS10199-17×26mm Flower Sugar Beads|4|H9-10-01
+FS10200-10PCS|FS10200-Diamond Decorated Cloth Bow|8|H9-11-01
+FS10184-Champagne-10PCS|FS10184-Tulip Fabric Flower|4|H9-12-01
+FS10184-Black-10PCS|FS10184-Tulip Fabric Flower|1|H9-13-01
+FS10201-DarkPink-100PCS|FS10201-About 17mm Farbic Bow Patch|10|H9-14-01
+FS10201-Purple-100PCS|FS10201-About 17mm Farbic Bow Patch|9|H9-15-01
+FS10201-Blue-100PCS|FS10201-About 17mm Farbic Bow Patch|10|H9-16-01
+FS10201-White-100PCS|FS10201-About 17mm Farbic Bow Patch|9|H9-17-01
+FS10201-Black-100PCS|FS10201-About 17mm Farbic Bow Patch|9|H9-18-01
+FS10201-BabyPink-100PCS|FS10201-About 17mm Farbic Bow Patch|9|H9-19-01
+FS10201-Yellow-100PCS|FS10201-About 17mm Farbic Bow Patch|10|H9-20-01
+FS10210-Mixed-9PCS|FS10210-Random Mixed Pokémon Pen Topper|5|H9-21-01
+FS10213-Mixed-10PCS|FS10213-Primitive Man Anime Pen Topper|5|H9-22-01
+FS10214-Mixed-10PCS|FS10214-Mixed Sanrio Family Pen Topper|5|H9-23-01
+FS10215-Mixed-12PCS|FS10215-Mixed Zootopia Pen Topper|5|H9-24-01
+
+    ... [此处请利用 Excel 将 1400 行转为上述文本格式粘贴在此]
+    `;
+
+    // 语音输入
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'zh-CN';
+    
+    function startVoice() {
+        try {
+            recognition.start();
+            document.getElementById('micBtn').classList.add('mic-active');
+        } catch (e) { recognition.stop(); }
+    }
+    
+    recognition.onresult = (e) => {
+        document.getElementById('userInput').value = e.results[0][0].transcript;
+        document.getElementById('micBtn').classList.remove('mic-active');
+        handleSend();
+    };
+
+    // 语音播放
+    function speak(text) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        window.speechSynthesis.speak(utterance);
+    }
+
+    function askKey() {
+        const key = prompt("设置 API Key:");
+        if(key) localStorage.setItem('zhipu_key', key);
+    }
+
+    async function handleSend() {
+        const input = document.getElementById('userInput');
+        const text = input.value.trim();
+        const apiKey = localStorage.getItem('zhipu_key');
+        
+        if (!text || !apiKey) { if(!apiKey) askKey(); return; }
+
+        addMsg(text, 'user');
+        input.value = '';
+        const aiBubble = addMsg("正在核对货架...", 'ai');
+
+        try {
+            const response = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                    model: "glm-4",
+                    messages: [
+                        { role: "system", content: "你是一位精通库存的DIY店长Zoe。你的数据如下：\n" + INVENTORY_DATABASE + "\n要求：1. 当用户询问产品时，必须报出 SKU、名称、可用库存和具体的【仓位编号】。2. 使用可爱的语气。3. 回答后自动读出来。" },
+                        { role: "user", content: text }
+                    ]
+                })
+            });
+            const data = await response.json();
+            const reply = data.choices[0].message.content;
+            aiBubble.innerText = reply;
+            speak(reply);
+        } catch (e) { aiBubble.innerText = "抱歉，我的大脑断网了，请检查 Key 或网络。"; }
+    }
+
+    function addMsg(text, role) {
+        const isAi = role === 'ai';
+        const row = document.createElement('div');
+        row.className = `message-row ${isAi ? 'ai-row' : 'user-row'}`;
+        row.innerHTML = isAi ? 
+            `<div class="avatar">Z</div><div class="bubble ai-bubble">${text}</div>` :
+            `<div class="bubble user-bubble">${text}</div>`;
+        document.getElementById('chat-box').appendChild(row);
+        document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
+        return row.querySelector('.bubble');
+    }
+
+    document.getElementById('userInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') handleSend(); });
+</script>
+</body>
+</html>
